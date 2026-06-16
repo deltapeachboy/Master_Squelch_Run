@@ -928,7 +928,7 @@ function drawUI() {
 
     if (drone.frozenTimer > 0) {
         ctx.fillStyle = "#33ffff";
-        ctx.fillText(`ドローン停止: ${drone.frozenTimer.toFixed(1)}s`, 15, 180);
+        ctx.fillText(`ドローンZ停止: ${drone.frozenTimer.toFixed(1)}s`, 15, 180);
     }
 
     ctx.fillStyle = "#888";
