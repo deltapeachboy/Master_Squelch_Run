@@ -4,7 +4,7 @@ const ctx = canvas.getContext("2d");
 // --- 世界共通ランキング設定 (Supabase を使用) ---
 // ご提示いただいた本番用のデータベースキーを完全に設定済みです。
 const SUPABASE_URL = "https://hpsfntzpdwkxscgigcpx.supabase.co";
-const SUPABASE_KEY = "sb_publishable_gkx8zaEKGYajjISQHBxDRQ_6rZqHk3K";
+const SUPABASE_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Imhwc2ZudHpwZHdreHNja2lnY3B4Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODE2MzgwODUsImV4cCI6MjA5NzIxNDA4NX0.-4ddjmwzBS99Uy5JXdzAvGwSm4sn-mUltiDt71Ap2ko";
 
 // --- ゲーム設定と状態 ---
 let gameState = "TITLE";
