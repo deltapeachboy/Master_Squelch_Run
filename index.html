@@ -1,0 +1,64 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>ドローンZからにげろ！</title>
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+    <div id="game-container">
+        <!-- メニュー画面 -->
+        <div id="menu-screen" class="screen">
+            <h1>ドローンZからにげろ！</h1>
+            <p>かんきちを操作して、ドローンZから逃げ回れ！</p>
+            <div class="main-layout">
+                <div class="mode-buttons">
+                    <button onclick="startGame('EASY')">かんたん (45秒)</button>
+                    <button onclick="startGame('NORMAL')">ふつう (45秒)</button>
+                    <button onclick="startGame('HARD')">むずかしい (45秒)</button>
+                    <button onclick="startGame('ENDLESS')">エンドレス (無限)</button>
+                </div>
+                <div class="leaderboard-container">
+                    <h3>🏆 世界ランキング (エンドレス)</h3>
+                    <div id="leaderboard-list">読み込み中...</div>
+                </div>
+            </div>
+        </div>
+
+        <!-- ゲームプレイ画面 -->
+        <canvas id="gameCanvas" width="800" height="600" style="display: none;"></canvas>
+
+        <!-- ゲームオーバー画面 -->
+        <div id="gameover-screen" class="screen" style="display: none;">
+            <h1 class="danger">GAME OVER</h1>
+            <p id="gameover-reason"></p>
+            <p id="gameover-score"></p>
+
+            <!-- コンティニュー用（残機がある場合のみ表示） -->
+            <div id="continue-container" style="display: none; margin-bottom: 20px;">
+                <p>しゅっせいだけの力で復活できます！</p>
+                <button id="continue-button" class="accent-btn" onclick="continueGame()">コンティニューする</button>
+            </div>
+
+            <!-- スコア送信フォーム（エンドレス時のみ表示） -->
+            <div id="ranking-input-container" style="display: none; margin-bottom: 20px;">
+                <input type="text" id="player-name" placeholder="名前を入力（半角英数推奨）" maxlength="10">
+                <button onclick="submitScore()">スコアを送信</button>
+            </div>
+
+            <button onclick="showMenu()">メニューに戻る</button>
+        </div>
+
+        <!-- ゲームクリア画面 -->
+        <div id="clear-screen" class="screen" style="display: none;">
+            <h1 class="success">GAME CLEAR!</h1>
+            <p>45秒間逃げ切った！</p>
+            <p id="clear-score"></p>
+            <button onclick="showMenu()">メニューに戻る</button>
+        </div>
+    </div>
+
+    <script src="game.js"></script>
+</body>
+</html>
