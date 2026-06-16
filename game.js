@@ -10,7 +10,7 @@ let gameState = "TITLE";
 let currentMode = "NORMAL";
 let gameTimer = 0;
 let orbTimer = 15;
-let orbsCollected = 0; // 取得したオーブの数
+let orbsCollected = 0;
 let itemSpawned = false;
 let lastItemSpawnTime = 0;
 
@@ -41,7 +41,9 @@ const imageSources = {
     bullet_green: "assets/bullet_green.png",
     bullet_yellow: "assets/bullet_yellow.png",
     bullet_rain: "assets/bullet_rain.png",
-    bullet_wall: "assets/bullet_wall.png"
+    bullet_wall: "assets/bullet_wall.png",
+    bullet_flame: "assets/bullet_flame.png",
+    bullet_fist: "assets/bullet_fist.png"
 };
 
 Object.keys(imageSources).forEach(key => {
@@ -86,9 +88,10 @@ function fetchLeaderboard() {
         data.forEach((entry, index) => {
             const row = document.createElement("div");
             row.className = "leaderboard-row";
+            const orbCount = entry.text || "0";
             row.innerHTML = `
                 <span>${index + 1}. ${entry.name}</span>
-                <span>${parseFloat(entry.seconds).toFixed(2)}秒 (${entry.orbs}個)</span>
+                <span>${parseFloat(entry.seconds).toFixed(2)}秒 (${orbCount}個)</span>
             `;
             listDiv.appendChild(row);
         });
@@ -126,7 +129,7 @@ function startGame(mode) {
         y: canvas.height * 0.75,
         width: 32,
         height: 32,
-        hitRadius: 4, // 当たり判定の半径（極小）
+        hitRadius: 4,
         baseSpeed: 4.5,
         speed: 4.5,
         direction: "UP",
@@ -160,7 +163,7 @@ function initDrone() {
         spiralAngle: 0,
         sweepDirection: 1,
         sweepAngleOffset: 0,
-        currentPattern: "SPIRAL"
+        currentPattern: "FIST"
     };
 }
 
@@ -298,14 +301,18 @@ function update(deltaTime) {
             drone.direction = Math.sin(angleToPlayer) > 0 ? "DOWN" : "UP";
         }
 
-        // 弾幕パターン切り替えロジック
+        // 弾幕パターン切り替えロジック (5種サイクル)
         if (currentMode === "HARD" || currentMode === "ENDLESS") {
             patternTimer += deltaTime;
-            if (patternTimer < 7.0) {
+            if (patternTimer < 6.0) {
+                drone.currentPattern = "FIST";
+            } else if (patternTimer < 12.0) {
+                drone.currentPattern = "BEAM";
+            } else if (patternTimer < 18.0) {
                 drone.currentPattern = "SPIRAL";
-            } else if (patternTimer < 14.0) {
+            } else if (patternTimer < 24.0) {
                 drone.currentPattern = "SWEEP";
-            } else if (patternTimer < 21.0) {
+            } else if (patternTimer < 30.0) {
                 drone.currentPattern = "FLOWER";
             } else {
                 patternTimer = 0;
@@ -326,13 +333,61 @@ function update(deltaTime) {
         triggerScreenBulletPatterns(deltaTime);
     }
 
-    // 弾の更新
+    // 弾の更新（移動処理と消去判定、および特殊弾幕のタメ・時間差・分裂制御）
     for (let i = bullets.length - 1; i >= 0; i--) {
         const b = bullets[i];
+
+        // Zパンチ（拳フォーメーション）の挙動制御
+        if (b.type === "fist_part") {
+            if (b.state === "charge") {
+                b.timer -= deltaTime;
+                if (b.timer <= 0) {
+                    if (b.action === "dash") {
+                        b.state = "dash";
+                        b.vx = b.dashVx;
+                        b.vy = b.dashVy;
+                    } else {
+                        // 霧散（拳の中心座標から前方180度へ綺麗に四散する）
+                        b.state = "scatter";
+                        const halfArc = Math.PI / 2;
+                        const randomOffset = (Math.random() - 0.5) * Math.PI;
+                        const scatterAngle = b.targetAngle + randomOffset;
+                        const speed = 4.5;
+                        b.vx = Math.cos(scatterAngle) * speed;
+                        b.vy = Math.sin(scatterAngle) * speed;
+                    }
+                }
+            }
+        }
+        // じごくのほのおの挙動（タメ減速から追尾急加速）
+        else if (b.type === "delayed_flame") {
+            if (b.state === "slowdown") {
+                b.vx *= 0.88;
+                b.vy *= 0.88;
+                if (Math.hypot(b.vx, b.vy) < 0.2) {
+                    b.vx = 0; b.vy = 0;
+                    b.state = "hover";
+                    b.timer = 0.6;
+                }
+            } else if (b.state === "hover") {
+                b.timer -= deltaTime;
+                if (b.timer <= 0) {
+                    b.state = "shoot";
+                    const px = player.x + player.width/2;
+                    const py = player.y + player.height/2;
+                    const angle = Math.atan2(py - b.y, px - b.x);
+                    b.vx = Math.cos(angle) * 7.5;
+                    b.vy = Math.sin(angle) * 7.5;
+                }
+            }
+        }
+
+        // 位置の更新
         b.x += b.vx;
         b.y += b.vy;
 
-        if (b.x < -20 || b.x > canvas.width + 20 || b.y < -20 || b.y > canvas.height + 20) {
+        // 画面外または霧散マークが付いた弾を消去
+        if (b.toRemove || b.x < -40 || b.x > canvas.width + 40 || b.y < -40 || b.y > canvas.height + 40) {
             bullets.splice(i, 1);
         }
     }
@@ -385,7 +440,7 @@ function update(deltaTime) {
     }
 }
 
-// --- カッコいい幾何学パターン弾幕の実行システム ---
+// --- 特殊ギミック弾幕生成ロジック ---
 function executeDroneBarrage(dx, dy, angleToPlayer) {
     if (drone.currentPattern === "CLASSIC") {
         let ways = 3;
@@ -396,18 +451,95 @@ function executeDroneBarrage(dx, dy, angleToPlayer) {
         spawnFan(dx, dy, angleToPlayer, ways, spread, bulletSpeed, "#ffbb00", "bullet_yellow");
         drone.shootCooldown = interval;
 
+    } else if (drone.currentPattern === "FIST") {
+        // ★Zパンチ（22個の巨大拳弾幕フォーメーション：1.4倍サイズ）
+        const fistOffsets = [
+            // 手首・腕
+            {x: -35, y: 70}, {x: 0, y: 70}, {x: 35, y: 70},
+            {x: -35, y: 42}, {x: 0, y: 42}, {x: 35, y: 42},
+            // 手のひら本体
+            {x: -56, y: 14}, {x: -28, y: 14}, {x: 0, y: 14}, {x: 28, y: 14}, {x: 56, y: 14},
+            {x: -56, y: -14}, {x: -28, y: -14}, {x: 0, y: -14}, {x: 28, y: -14}, {x: 56, y: -14},
+            // 各指の関節
+            {x: -56, y: -42}, {x: -56, y: -63}, // 小指
+            {x: -21, y: -42}, {x: -21, y: -70}, // 薬指
+            {x: 14, y: -42}, {x: 14, y: -73},   // 中指
+            {x: 49, y: -42}, {x: 49, y: -67},   // 人差し指
+            // 折りたたんだ親指（左に少し突き出す）
+            {x: -84, y: -7}, {x: -84, y: 21}, {x: -63, y: 35}
+        ];
+
+        const px = player.x + player.width/2;
+        const py = player.y + player.height/2;
+
+        const targetAngle = Math.atan2(py - dy, px - dx);
+
+        const action = Math.random() < 0.5 ? "dash" : "scatter";
+        let dashVx = 0;
+        let dashVy = 0;
+        if (action === "dash") {
+            const speed = 8.5;
+            dashVx = Math.cos(targetAngle) * speed;
+            dashVy = Math.sin(targetAngle) * speed;
+        }
+
+        // 拳パーツ弾を配置
+        fistOffsets.forEach(offset => {
+            bullets.push({
+                type: "fist_part",
+                state: "charge",
+                timer: 1.0,
+                x: dx + offset.x,
+                y: dy + offset.y,
+                centerX: dx,
+                centerY: dy,
+                vx: 0,
+                vy: 0,
+                radius: 7.0,
+                color: "#00b7ff",
+                spriteKey: "bullet_fist",
+                action: action,
+                dashVx: dashVx,
+                dashVy: dashVy,
+                targetAngle: targetAngle
+            });
+        });
+
+        drone.shootCooldown = 1.9;
+
+    } else if (drone.currentPattern === "BEAM") {
+        // ★パターンB：じごくのほのお（時間差・追尾炎）
+        const angle = angleToPlayer + (Math.random() - 0.5) * 0.5;
+        const initialSpeed = 6.0;
+
+        bullets.push({
+            type: "delayed_flame",
+            state: "slowdown",
+            timer: 0,
+            x: dx,
+            y: dy,
+            vx: Math.cos(angle) * initialSpeed,
+            vy: Math.sin(angle) * initialSpeed,
+            radius: 7,
+            color: "#ff6600",
+            spriteKey: "bullet_flame"
+        });
+
+        drone.shootCooldown = 0.25;
+
     } else if (drone.currentPattern === "SPIRAL") {
-        // パターンA：ウッキー・スパイラル
+        // ★パターンC：ウッキー・スパイラル（復活・隙間広め）
         drone.spiralAngle = (drone.spiralAngle || 0) + 0.16;
         const speed = 3.8;
 
         bullets.push({ x: dx, y: dy, vx: Math.cos(drone.spiralAngle) * speed, vy: Math.sin(drone.spiralAngle) * speed, radius: 5, color: "#00b7ff", spriteKey: "bullet_blue" });
         bullets.push({ x: dx, y: dy, vx: Math.cos(drone.spiralAngle + Math.PI) * speed, vy: Math.sin(drone.spiralAngle + Math.PI) * speed, radius: 5, color: "#00b7ff", spriteKey: "bullet_blue" });
 
-        drone.shootCooldown = 0.08;
+        // 連射間隔を0.08秒 → 0.14秒に緩和し、滑り込みやすく調整
+        drone.shootCooldown = 0.14;
 
     } else if (drone.currentPattern === "SWEEP") {
-        // パターンB：ヴァイパー・スイープ
+        // パターンD：ヴァイパー・スイープ（復活）
         drone.sweepAngleOffset = (drone.sweepAngleOffset || 0) + (0.05 * drone.sweepDirection);
         if (Math.abs(drone.sweepAngleOffset) > 0.6) {
             drone.sweepDirection *= -1;
@@ -422,7 +554,7 @@ function executeDroneBarrage(dx, dy, angleToPlayer) {
         drone.shootCooldown = 0.4;
 
     } else if (drone.currentPattern === "FLOWER") {
-        // パターンC：ふくびきけん・キャットバースト
+        // パターンE：ふくびきけん・キャットバースト（復活）
         const numBullets = 10;
         const speed = 3.0;
         const offsetAngle = gameTimer * 1.5;
@@ -462,7 +594,7 @@ function spawnFan(dx, dy, centerAngle, ways, spread, speed, color, spriteKey) {
     }
 }
 
-// --- 画面全体の環境弾幕（雨・横壁） ---
+// --- 画面全体の環境弾幕 ---
 function triggerScreenBulletPatterns(deltaTime) {
     let rainInterval = 0.5;
     let rainSpeed = 2.5;
@@ -542,7 +674,7 @@ function applyItemEffect(type) {
     } else if (type === "life") {
         player.lives++;
     } else if (type === "freeze") {
-        drone.frozenTimer = 5.0; // フリーズを5秒に
+        drone.frozenTimer = 5.0;
     }
 }
 
@@ -628,7 +760,7 @@ function submitScore() {
     .then(() => {
         alert("世界ランキングに記録が登録されました！");
         document.getElementById("ranking-input-container").style.display = "none";
-        fetchLeaderboard(); // 送信後に最新ランキングをロード
+        fetchLeaderboard();
     })
     .catch(err => {
         alert("送信エラーが発生しました。");
@@ -692,6 +824,7 @@ function drawBullets() {
         if (img && img.loaded) {
             ctx.save();
 
+            // 拳の構成弾を綺麗に丸くマスクする
             const visualRadius = b.radius * 1.25;
 
             ctx.beginPath();
@@ -758,6 +891,9 @@ function drawUI() {
         ctx.fillStyle = "#ff55ff";
         ctx.font = "14px Arial";
         let patternName = "";
+        // ★UI上の弾幕モード名称を変更
+        if (drone.currentPattern === "FIST") patternName = "Zパンチ（巨大拳・タメ突進/前方霧散）";
+        if (drone.currentPattern === "BEAM") patternName = "じごくのほのお（時間差・追尾炎）";
         if (drone.currentPattern === "SPIRAL") patternName = "ウッキー・スパイラル（渦巻き）";
         if (drone.currentPattern === "SWEEP") patternName = "ヴァイパー・スイープ（スイング）";
         if (drone.currentPattern === "FLOWER") patternName = "ふくびきけん・キャットバースト（十方放射）";
