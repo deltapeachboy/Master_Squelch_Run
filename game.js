@@ -2,8 +2,9 @@ const canvas = document.getElementById("gameCanvas");
 const ctx = canvas.getContext("2d");
 
 // --- 世界共通ランキング設定 (Supabase を使用) ---
+// ご提示いただいた本番用のデータベースキーを完全に設定済みです。
 const SUPABASE_URL = "https://hpsfntzpdwkxscgigcpx.supabase.co";
-const SUPABASE_KEY = "ここに先ほどコピーした sb_publishable_... のキーを貼り付けてください";
+const SUPABASE_KEY = "sb_publishable_gkx8zaEKGYajjISQHBxDRQ_6rZqHk3K";
 
 // --- ゲーム設定と状態 ---
 let gameState = "TITLE";
@@ -19,7 +20,7 @@ let rainTimer = 0;
 let waveTimer = 0;
 let patternTimer = 0;
 
-// --- スプライト画像の定義（プレイヤーとドローンのみ画像を使用） ---
+// --- スプライト画像の定義 ---
 const images = {};
 const imageSources = {
     kankichi_UP: "assets/kankichi_up.png",
@@ -29,7 +30,21 @@ const imageSources = {
     drone_UP: "assets/drone_up.png",
     drone_DOWN: "assets/drone_down.png",
     drone_LEFT: "assets/drone_left.png",
-    drone_RIGHT: "assets/drone_right.png"
+    drone_RIGHT: "assets/drone_right.png",
+    item_speed: "assets/item_speed.png",
+    item_life: "assets/item_life.png",
+    item_freeze: "assets/item_freeze.png",
+    orb: "assets/orb.png",
+
+    // 弾幕スプライト群
+    bullet_blue: "assets/bullet_blue.png",
+    bullet_pink: "assets/bullet_pink.png",
+    bullet_green: "assets/bullet_green.png",
+    bullet_yellow: "assets/bullet_yellow.png",
+    bullet_rain: "assets/bullet_rain.png",
+    bullet_wall: "assets/bullet_wall.png",
+    bullet_flame: "assets/bullet_flame.png",
+    bullet_fist: "assets/bullet_fist.png"
 };
 
 Object.keys(imageSources).forEach(key => {
@@ -116,7 +131,7 @@ function startGame(mode) {
         width: 32,
         height: 32,
         hitRadius: 4,
-        baseSpeed: 5.85, // 基本速度を 4.5 → 5.85 にアップ (1.3倍)
+        baseSpeed: 5.85,
         speed: 5.85,
         direction: "UP",
         lives: 0,
@@ -132,11 +147,10 @@ function startGame(mode) {
 }
 
 function initDrone() {
-    // 各難易度ごとのドローン基本速度を1.3倍にアップ
-    let droneSpeed = 1.3; // NORMAL基準：1.0 → 1.3
-    if (currentMode === "EASY") droneSpeed = 0.78; // EASY: 0.6 → 0.78
+    let droneSpeed = 1.3;
+    if (currentMode === "EASY") droneSpeed = 0.78;
     else if (currentMode === "NORMAL") droneSpeed = 1.3;
-    else if (currentMode === "HARD" || currentMode === "ENDLESS") droneSpeed = 1.56; // HARD: 1.2 → 1.56
+    else if (currentMode === "HARD" || currentMode === "ENDLESS") droneSpeed = 1.56;
 
     drone = {
         x: canvas.width / 2,
@@ -253,6 +267,12 @@ function update(deltaTime) {
         if (keys["ArrowLeft"] || keys["a"] || keys["A"]) { dx = -1; player.direction = "LEFT"; }
         if (keys["ArrowRight"] || keys["d"] || keys["D"]) { dx = 1; player.direction = "RIGHT"; }
 
+        // ★斜め移動時の速度補正（0.7071倍）が復活しました。
+        if (dx !== 0 && dy !== 0) {
+            dx *= 0.7071;
+            dy *= 0.7071;
+        }
+
         player.x += dx * player.speed;
         player.y += dy * player.speed;
         player.x = Math.max(0, Math.min(canvas.width - player.width, player.x));
@@ -270,7 +290,6 @@ function update(deltaTime) {
 
         let currentDroneSpeed = drone.speed;
         if (currentMode === "ENDLESS") {
-            // エンドレス時の上昇上限値も1.3倍の 2.6 まで緩和
             currentDroneSpeed = Math.min(2.6, drone.speed + (gameTimer / 150));
         }
 
@@ -284,7 +303,7 @@ function update(deltaTime) {
             drone.direction = Math.sin(angleToPlayer) > 0 ? "DOWN" : "UP";
         }
 
-        // 弾幕パターン切り替えロジック
+        // 弾幕パターン切り替えロジック (5種サイクル)
         if (currentMode === "HARD" || currentMode === "ENDLESS") {
             patternTimer += deltaTime;
             if (patternTimer < 6.0) {
@@ -316,11 +335,11 @@ function update(deltaTime) {
         triggerScreenBulletPatterns(deltaTime);
     }
 
-    // 弾の更新（特殊弾幕の動作処理、および不要な弾の消去）
+    // 弾の更新（移動処理と消去判定、および特殊弾幕のタメ・時間差・分裂制御）
     for (let i = bullets.length - 1; i >= 0; i--) {
         const b = bullets[i];
 
-        // Zパンチ（拳形状）の制御
+        // Zパンチ（拳フォーメーション）の挙動制御
         if (b.type === "fist_part") {
             if (b.state === "charge") {
                 b.timer -= deltaTime;
@@ -330,7 +349,9 @@ function update(deltaTime) {
                         b.vx = b.dashVx;
                         b.vy = b.dashVy;
                     } else {
+                        // 霧散（拳の中心座標から前方180度へ綺麗に四散する）
                         b.state = "scatter";
+                        const halfArc = Math.PI / 2;
                         const randomOffset = (Math.random() - 0.5) * Math.PI;
                         const scatterAngle = b.targetAngle + randomOffset;
                         const speed = 4.5;
@@ -340,7 +361,7 @@ function update(deltaTime) {
                 }
             }
         }
-        // じごくのほのおの制御（タメ減速から追尾急加速）
+        // じごくのほのおの挙動（タメ減速から追尾急加速）
         else if (b.type === "delayed_flame") {
             if (b.state === "slowdown") {
                 b.vx *= 0.88;
@@ -366,6 +387,7 @@ function update(deltaTime) {
         b.x += b.vx;
         b.y += b.vy;
 
+        // 画面外または霧散マークが付いた弾を消去
         if (b.toRemove || b.x < -40 || b.x > canvas.width + 40 || b.y < -40 || b.y > canvas.height + 40) {
             bullets.splice(i, 1);
         }
@@ -427,24 +449,24 @@ function executeDroneBarrage(dx, dy, angleToPlayer) {
         let bulletSpeed = currentMode === "EASY" ? 3.2 : 4.5;
         let interval = currentMode === "EASY" ? 1.8 : 1.2;
 
-        spawnFan(dx, dy, angleToPlayer, ways, spread, bulletSpeed, "#ffbb00");
+        spawnFan(dx, dy, angleToPlayer, ways, spread, bulletSpeed, "#ffbb00", "bullet_yellow");
         drone.shootCooldown = interval;
 
     } else if (drone.currentPattern === "FIST") {
-        // Zパンチ（拳フォーメーション・高低差あり・超巨大）
+        // ★Zパンチ（22個の巨大拳弾幕フォーメーション：1.4倍サイズ）
         const fistOffsets = [
-            // 手首
+            // 手首・腕
             {x: -35, y: 70}, {x: 0, y: 70}, {x: 35, y: 70},
             {x: -35, y: 42}, {x: 0, y: 42}, {x: 35, y: 42},
-            // 手のひら
+            // 手のひら本体
             {x: -56, y: 14}, {x: -28, y: 14}, {x: 0, y: 14}, {x: 28, y: 14}, {x: 56, y: 14},
             {x: -56, y: -14}, {x: -28, y: -14}, {x: 0, y: -14}, {x: 28, y: -14}, {x: 56, y: -14},
             // 各指の関節
-            {x: -56, y: -42}, {x: -56, y: -63},
-            {x: -21, y: -42}, {x: -21, y: -70},
-            {x: 14, y: -42}, {x: 14, y: -73},
-            {x: 49, y: -42}, {x: 49, y: -67},
-            // 折りたたんだ親指
+            {x: -56, y: -42}, {x: -56, y: -63}, // 小指
+            {x: -21, y: -42}, {x: -21, y: -70}, // 薬指
+            {x: 14, y: -42}, {x: 14, y: -73},   // 中指
+            {x: 49, y: -42}, {x: 49, y: -67},   // 人差し指
+            // 折りたたんだ親指（左に少し突き出す）
             {x: -84, y: -7}, {x: -84, y: 21}, {x: -63, y: 35}
         ];
 
@@ -462,6 +484,7 @@ function executeDroneBarrage(dx, dy, angleToPlayer) {
             dashVy = Math.sin(targetAngle) * speed;
         }
 
+        // 拳パーツ弾を配置
         fistOffsets.forEach(offset => {
             bullets.push({
                 type: "fist_part",
@@ -475,6 +498,7 @@ function executeDroneBarrage(dx, dy, angleToPlayer) {
                 vy: 0,
                 radius: 7.0,
                 color: "#00b7ff",
+                spriteKey: "bullet_fist",
                 action: action,
                 dashVx: dashVx,
                 dashVy: dashVy,
@@ -485,7 +509,7 @@ function executeDroneBarrage(dx, dy, angleToPlayer) {
         drone.shootCooldown = 1.9;
 
     } else if (drone.currentPattern === "BEAM") {
-        // じごくのほのお（時間差・追尾炎）
+        // ★パターンB：じごくのほのお（時間差・追尾炎）
         const angle = angleToPlayer + (Math.random() - 0.5) * 0.5;
         const initialSpeed = 6.0;
 
@@ -498,23 +522,25 @@ function executeDroneBarrage(dx, dy, angleToPlayer) {
             vx: Math.cos(angle) * initialSpeed,
             vy: Math.sin(angle) * initialSpeed,
             radius: 7,
-            color: "#ff6600"
+            color: "#ff6600",
+            spriteKey: "bullet_flame"
         });
 
         drone.shootCooldown = 0.25;
 
     } else if (drone.currentPattern === "SPIRAL") {
-        // ウッキー・スパイラル（渦巻き：隙間緩和版）
+        // ★パターンC：ウッキー・スパイラル（復活・隙間広め）
         drone.spiralAngle = (drone.spiralAngle || 0) + 0.16;
         const speed = 3.8;
 
-        bullets.push({ x: dx, y: dy, vx: Math.cos(drone.spiralAngle) * speed, vy: Math.sin(drone.spiralAngle) * speed, radius: 5, color: "#00b7ff" });
-        bullets.push({ x: dx, y: dy, vx: Math.cos(drone.spiralAngle + Math.PI) * speed, vy: Math.sin(drone.spiralAngle + Math.PI) * speed, radius: 5, color: "#00b7ff" });
+        bullets.push({ x: dx, y: dy, vx: Math.cos(drone.spiralAngle) * speed, vy: Math.sin(drone.spiralAngle) * speed, radius: 5, color: "#00b7ff", spriteKey: "bullet_blue" });
+        bullets.push({ x: dx, y: dy, vx: Math.cos(drone.spiralAngle + Math.PI) * speed, vy: Math.sin(drone.spiralAngle + Math.PI) * speed, radius: 5, color: "#00b7ff", spriteKey: "bullet_blue" });
 
+        // 連射速度を0.14秒に落としてかわしやすく調整
         drone.shootCooldown = 0.14;
 
     } else if (drone.currentPattern === "SWEEP") {
-        // ヴァイパー・スイープ（スイング扇弾）
+        // パターンD：ヴァイパー・スイープ（復活）
         drone.sweepAngleOffset = (drone.sweepAngleOffset || 0) + (0.05 * drone.sweepDirection);
         if (Math.abs(drone.sweepAngleOffset) > 0.6) {
             drone.sweepDirection *= -1;
@@ -525,11 +551,11 @@ function executeDroneBarrage(dx, dy, angleToPlayer) {
         const spread = 0.26;
         const speed = 4.5;
 
-        spawnFan(dx, dy, currentAngle, ways, spread, speed, "#ff00bb");
+        spawnFan(dx, dy, currentAngle, ways, spread, speed, "#ff00bb", "bullet_pink");
         drone.shootCooldown = 0.4;
 
     } else if (drone.currentPattern === "FLOWER") {
-        // ふくびきけん・キャットバースト（十方放射）
+        // パターンE：ふくびきけん・キャットバースト（復活）
         const numBullets = 10;
         const speed = 3.0;
         const offsetAngle = gameTimer * 1.5;
@@ -542,7 +568,8 @@ function executeDroneBarrage(dx, dy, angleToPlayer) {
                 vx: Math.cos(angle) * speed,
                 vy: Math.sin(angle) * speed,
                 radius: 6,
-                color: "#00ffaa"
+                color: "#00ffaa",
+                spriteKey: "bullet_green"
             });
         }
         drone.shootCooldown = 0.9;
@@ -550,7 +577,7 @@ function executeDroneBarrage(dx, dy, angleToPlayer) {
 }
 
 // 扇状展開のヘルパー関数
-function spawnFan(dx, dy, centerAngle, ways, spread, speed, color) {
+function spawnFan(dx, dy, centerAngle, ways, spread, speed, color, spriteKey) {
     const startIdx = -Math.floor(ways / 2);
     const endIdx = Math.floor(ways / 2);
 
@@ -562,7 +589,8 @@ function spawnFan(dx, dy, centerAngle, ways, spread, speed, color) {
             vx: Math.cos(bulletAngle) * speed,
             vy: Math.sin(bulletAngle) * speed,
             radius: 6,
-            color: color
+            color: color,
+            spriteKey: spriteKey || "bullet_yellow"
         });
     }
 }
@@ -606,7 +634,8 @@ function triggerScreenBulletPatterns(deltaTime) {
             vx: (Math.random() - 0.5) * 0.6,
             vy: rainSpeed,
             radius: 5,
-            color: "#4488ff"
+            color: "#4488ff",
+            spriteKey: "bullet_rain"
         });
         rainTimer = rainInterval;
     }
@@ -631,7 +660,8 @@ function triggerScreenBulletPatterns(deltaTime) {
                 vx: side === "LEFT" ? waveSpeed : -waveSpeed,
                 vy: 0,
                 radius: 6,
-                color: "#ff7700"
+                color: "#ff7700",
+                spriteKey: "bullet_wall"
             });
         }
         waveTimer = waveInterval;
@@ -788,47 +818,72 @@ function drawDrone() {
     }
 }
 
-// 弾幕を描画するロジック（シンプルなベクトルサークルに変更し、完全にラグが解消されました）
+// ★最適化：キャッシュから丸く切り抜かれた画像を取得する、高速描画システム
+const croppedImageCache = {};
+function getCircularTexture(spriteKey, img) {
+    if (croppedImageCache[spriteKey]) {
+        return croppedImageCache[spriteKey];
+    }
+    const offscreen = document.createElement("canvas");
+    const size = 64;
+    offscreen.width = size;
+    offscreen.height = size;
+    const oCtx = offscreen.getContext("2d");
+
+    oCtx.beginPath();
+    oCtx.arc(size / 2, size / 2, size / 2, 0, Math.PI * 2);
+    oCtx.closePath();
+    oCtx.clip();
+
+    oCtx.drawImage(img, 0, 0, size, size);
+
+    croppedImageCache[spriteKey] = offscreen;
+    return offscreen;
+}
+
+// 弾幕を描画するロジック (事前切り抜きキャッシュを使用して超高速に描画されます)
 function drawBullets() {
     bullets.forEach(b => {
-        ctx.beginPath();
-        ctx.arc(b.x, b.y, b.radius, 0, Math.PI * 2);
-        ctx.fillStyle = b.color || "#ffffff";
-        ctx.fill();
-        ctx.closePath();
+        const img = images[b.spriteKey];
+        if (img && img.loaded) {
+            const texture = getCircularTexture(b.spriteKey, img);
+            const visualRadius = b.radius * 1.25;
+            ctx.drawImage(texture, b.x - visualRadius, b.y - visualRadius, visualRadius * 2, visualRadius * 2);
+        } else {
+            ctx.beginPath();
+            ctx.arc(b.x, b.y, b.radius, 0, Math.PI * 2);
+            ctx.fillStyle = b.color || "#ffffff";
+            ctx.fill();
+            ctx.closePath();
+        }
     });
 }
 
-// 闇のオーブとお助けアイテムの描画ロジック（画像から高性能なパーティクル描画に移行）
 function drawOrbAndItems() {
-    ctx.beginPath();
-    ctx.arc(darkOrb.x, darkOrb.y, darkOrb.radius, 0, Math.PI * 2);
-    ctx.fillStyle = "#aa00ff";
-    ctx.shadowBlur = 12;
-    ctx.shadowColor = "#aa00ff";
-    ctx.fill();
-    ctx.shadowBlur = 0;
-    ctx.closePath();
+    if (images.orb && images.orb.loaded) {
+        ctx.drawImage(images.orb, darkOrb.x - darkOrb.radius, darkOrb.y - darkOrb.radius, darkOrb.radius * 2, darkOrb.radius * 2);
+    } else {
+        ctx.beginPath();
+        ctx.arc(darkOrb.x, darkOrb.y, darkOrb.radius, 0, Math.PI * 2);
+        ctx.fillStyle = "#aa00ff";
+        ctx.shadowBlur = 10;
+        ctx.shadowColor = "#aa00ff";
+        ctx.fill();
+        ctx.shadowBlur = 0;
+        ctx.closePath();
+    }
 
     if (activeItem) {
-        ctx.beginPath();
-        ctx.arc(activeItem.x + activeItem.width/2, activeItem.y + activeItem.height/2, activeItem.width/2, 0, Math.PI * 2);
-
-        let color = "#ffffff";
-        let text = "";
-        if (activeItem.type === "speed") { color = "#00ff00"; text = "S"; }
-        else if (activeItem.type === "life") { color = "#ff00ff"; text = "L"; }
-        else if (activeItem.type === "freeze") { color = "#00ffff"; text = "F"; }
-
-        ctx.fillStyle = color;
-        ctx.fill();
-        ctx.closePath();
-
-        ctx.fillStyle = "#000000";
-        ctx.font = "bold 12px sans-serif";
-        ctx.textAlign = "center";
-        ctx.fillText(text, activeItem.x + activeItem.width/2, activeItem.y + activeItem.height/2 + 4);
-        ctx.textAlign = "left";
+        const key = `item_${activeItem.type}`;
+        if (images[key] && images[key].loaded) {
+            ctx.drawImage(images[key], activeItem.x, activeItem.y, activeItem.width, activeItem.height);
+        } else {
+            ctx.fillStyle = activeItem.type === "speed" ? "#00ff00" : (activeItem.type === "life" ? "#ff00ff" : "#00ffff");
+            ctx.fillRect(activeItem.x, activeItem.y, activeItem.width, activeItem.height);
+            ctx.fillStyle = "#fff";
+            ctx.font = "9px sans-serif";
+            ctx.fillText(activeItem.type, activeItem.x - 5, activeItem.y - 4);
+        }
     }
 }
 
@@ -849,6 +904,7 @@ function drawUI() {
         ctx.fillStyle = "#ff55ff";
         ctx.font = "14px Arial";
         let patternName = "";
+        // ★UI上の弾幕モード名称を変更
         if (drone.currentPattern === "FIST") patternName = "Zパンチ（巨大拳・タメ突進/前方霧散）";
         if (drone.currentPattern === "BEAM") patternName = "じごくのほのお（時間差・追尾炎）";
         if (drone.currentPattern === "SPIRAL") patternName = "ウッキー・スパイラル（渦巻き）";
