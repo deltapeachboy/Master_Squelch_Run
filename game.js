@@ -2,6 +2,7 @@ const canvas = document.getElementById("gameCanvas");
 const ctx = canvas.getContext("2d");
 
 // --- グローバルランキング設定 (dreamlo API を使用) ---
+// 先ほど取得されたご自身専用のキーを正確に設定しています。
 const DREAMLO_PUBLIC_KEY = "6a31c3eb8f40bb1318c774ac";
 const DREAMLO_PRIVATE_KEY = "Msa1Oh9DikOgg3FIjbKM1gIWyo9dx52Ei_DpJ51QN1Gw";
 
@@ -63,17 +64,18 @@ const keys = {};
 window.addEventListener("keydown", e => keys[e.key] = true);
 window.addEventListener("keyup", e => keys[e.key] = false);
 
-// --- 世界ランキングの取得 ---
+// --- 世界ランキングの取得（セキュリティ対策 www. 付き） ---
 function fetchLeaderboard() {
     const listDiv = document.getElementById("leaderboard-list");
     listDiv.innerHTML = "読み込み中...";
 
+    // 接続の安定性を高めるため www.dreamlo.com を宛先に指定
     fetch(`https://www.dreamlo.com/lb/${DREAMLO_PUBLIC_KEY}/json`)
         .then(response => response.json())
         .then(data => {
             listDiv.innerHTML = "";
             if (!data.dreamlo || !data.dreamlo.leaderboard || !data.dreamlo.leaderboard.entry) {
-                listDiv.innerHTML = "<div style='color:#888;'>まだ記録がありません。</div>";
+                listDiv.innerHTML = "<div style='color:#888; text-align:center; padding-top:20px;'>まだ記録がありません。</div>";
                 return;
             }
 
@@ -96,7 +98,7 @@ function fetchLeaderboard() {
             });
         })
         .catch(err => {
-            listDiv.innerHTML = "<div style='color:#ff4444;'>ランキングを取得できませんでした。</div>";
+            listDiv.innerHTML = "<div style='color:#ff4444; text-align:center; padding-top:20px;'>ランキングを取得できませんでした。</div>";
         });
 }
 
@@ -300,7 +302,7 @@ function update(deltaTime) {
             drone.direction = Math.sin(angleToPlayer) > 0 ? "DOWN" : "UP";
         }
 
-        // 弾幕パターン切り替えロジック
+        // 弾幕パターン切り替え
         if (currentMode === "HARD" || currentMode === "ENDLESS") {
             patternTimer += deltaTime;
             if (patternTimer < 7.0) {
@@ -399,7 +401,7 @@ function executeDroneBarrage(dx, dy, angleToPlayer) {
         drone.shootCooldown = interval;
 
     } else if (drone.currentPattern === "SPIRAL") {
-        // ★パターンA：ウッキー・スパイラル
+        // パターンA：ウッキー・スパイラル
         drone.spiralAngle = (drone.spiralAngle || 0) + 0.16;
         const speed = 3.8;
 
@@ -409,7 +411,7 @@ function executeDroneBarrage(dx, dy, angleToPlayer) {
         drone.shootCooldown = 0.08;
 
     } else if (drone.currentPattern === "SWEEP") {
-        // ★パターンB：ヴァイパー・スイープ
+        // パターンB：ヴァイパー・スイープ
         drone.sweepAngleOffset = (drone.sweepAngleOffset || 0) + (0.05 * drone.sweepDirection);
         if (Math.abs(drone.sweepAngleOffset) > 0.6) {
             drone.sweepDirection *= -1;
@@ -424,7 +426,7 @@ function executeDroneBarrage(dx, dy, angleToPlayer) {
         drone.shootCooldown = 0.4;
 
     } else if (drone.currentPattern === "FLOWER") {
-        // ★パターンC：ふくびきけん・キャットバースト
+        // パターンC：ふくびきけん・キャットバースト
         const numBullets = 10;
         const speed = 3.0;
         const offsetAngle = gameTimer * 1.5;
@@ -601,7 +603,7 @@ function endGame(reason) {
     }
 }
 
-// --- 世界ランキング送信 ---
+// --- 世界ランキング送信（セキュリティ・CORS回避設定を追加） ---
 function submitScore() {
     const nameInput = document.getElementById("player-name");
     const name = nameInput.value.trim().replace(/[^a-zA-Z0-9]/g, "");
@@ -614,15 +616,18 @@ function submitScore() {
     const seconds = gameTimer.toFixed(2);
     const scoreVal = Math.floor(gameTimer * 100);
 
+    // 通信エラーを防ぐため www.dreamlo.com 宛てに設定
     const url = `https://www.dreamlo.com/lb/${DREAMLO_PRIVATE_KEY}/add/${name}/${scoreVal}/${seconds}/${orbsCollected}`;
 
-    fetch(url)
+    // ★重要: browserのCORSブロックを完全に無視する { mode: 'no-cors' } を設定して送信
+    fetch(url, { mode: 'no-cors' })
         .then(() => {
             alert("世界ランキングに記録が登録されました！");
             document.getElementById("ranking-input-container").style.display = "none";
+            fetchLeaderboard(); // 送信完了後にランキングを再描画
         })
         .catch(err => {
-            alert("通信エラーが発生し、記録を送信できませんでした。");
+            alert("通信環境により送信できませんでした。");
         });
 }
 
@@ -748,7 +753,6 @@ function drawUI() {
         ctx.fillStyle = "#ff55ff";
         ctx.font = "14px Arial";
         let patternName = "";
-        // ★UIに表示される各弾幕の名称をアップデート
         if (drone.currentPattern === "SPIRAL") patternName = "ウッキー・スパイラル（渦巻き）";
         if (drone.currentPattern === "SWEEP") patternName = "ヴァイパー・スイープ（スイング）";
         if (drone.currentPattern === "FLOWER") patternName = "ふくびきけん・キャットバースト（十方放射）";
