@@ -3,7 +3,7 @@ const ctx = canvas.getContext("2d");
 
 // --- グローバルランキング設定 (dreamlo API を使用) ---
 const DREAMLO_PUBLIC_KEY = "6a31c3eb8f40bb1318c774ac";
-const DREAMLO_PRIVATE_KEY = "Msa1Oh9DikOgg3FljbKM1gIWyo9dx52Ei_DpJ51QN1Gw";
+const DREAMLO_PRIVATE_KEY = "Msa1Oh9DikOgg3FIjbKM1gIWyo9dx52Ei_DpJ51QN1Gw";
 
 // --- ゲーム設定と状態 ---
 let gameState = "TITLE";
