@@ -3,7 +3,7 @@ const ctx = canvas.getContext("2d");
 
 // --- 世界共通ランキング設定 (Supabase を使用) ---
 const SUPABASE_URL = "https://hpsfntzpdwkxscgigcpx.supabase.co";
-const SUPABASE_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Imhwc2ZudHpwZHdreHNja2lnY3B4Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODE2MzgwODUsImV4cCI6MjA5NzIxNDA4NX0.-4ddjmwzBS99Uy5JXdzAvGwSm4sn-mUltiDt71Ap2ko";
+const SUPABASE_KEY = "sb_publishable_gkX8zaEKGYAjjISQhBxDRQ_6rZqHk3K";
 
 // --- ゲーム設定と状態 ---
 let gameState = "TITLE";
@@ -29,21 +29,7 @@ const imageSources = {
     drone_UP: "assets/drone_up.png",
     drone_DOWN: "assets/drone_down.png",
     drone_LEFT: "assets/drone_left.png",
-    drone_RIGHT: "assets/drone_right.png",
-    item_speed: "assets/item_speed.png",
-    item_life: "assets/item_life.png",
-    item_freeze: "assets/item_freeze.png",
-    orb: "assets/orb.png",
-
-    // 弾幕スプライト群
-    bullet_blue: "assets/bullet_blue.png",
-    bullet_pink: "assets/bullet_pink.png",
-    bullet_green: "assets/bullet_green.png",
-    bullet_yellow: "assets/bullet_yellow.png",
-    bullet_rain: "assets/bullet_rain.png",
-    bullet_wall: "assets/bullet_wall.png",
-    bullet_flame: "assets/bullet_flame.png",
-    bullet_fist: "assets/bullet_fist.png"
+    drone_RIGHT: "assets/drone_right.png"
 };
 
 Object.keys(imageSources).forEach(key => {
@@ -65,7 +51,46 @@ const keys = {};
 window.addEventListener("keydown", e => keys[e.key] = true);
 window.addEventListener("keyup", e => keys[e.key] = false);
 
-// --- 世界ランキングの取得（Supabase REST API 経由） ---
+// --- ローカルストレージ用（通信ブロック時のバックアップ表示） ---
+function loadLocalLeaderboard() {
+    const listDiv = document.getElementById("leaderboard-list");
+    listDiv.innerHTML = "";
+
+    const data = localStorage.getItem("kankichi_local_leaderboard");
+    let entries = [];
+    if (data) {
+        entries = JSON.parse(data);
+    }
+
+    if (entries.length === 0) {
+        listDiv.innerHTML = "<div style='color:#888; text-align:center; padding-top:20px;'>世界ランキングがブロックされたため、ローカルモードで動作中。<br>（まだ記録がありません）</div>";
+        return;
+    }
+
+    entries.sort((a, b) => b.seconds - a.seconds);
+
+    entries.slice(0, 10).forEach((entry, index) => {
+        const row = document.createElement("div");
+        row.className = "leaderboard-row";
+        row.innerHTML = `
+            <span>${index + 1}. ${entry.name} (ローカル)</span>
+            <span>${entry.seconds.toFixed(2)}秒 (${entry.orbs}個)</span>
+        `;
+        listDiv.appendChild(row);
+    });
+}
+
+function saveLocalScore(name, seconds, orbs) {
+    const data = localStorage.getItem("kankichi_local_leaderboard");
+    let entries = [];
+    if (data) {
+        entries = JSON.parse(data);
+    }
+    entries.push({ name: name, seconds: seconds, orbs: orbs });
+    localStorage.setItem("kankichi_local_leaderboard", JSON.stringify(entries));
+}
+
+// --- 世界ランキングの取得（通信遮断時は自動でローカルランキングを表示） ---
 function fetchLeaderboard() {
     const listDiv = document.getElementById("leaderboard-list");
     listDiv.innerHTML = "読み込み中...";
@@ -104,7 +129,9 @@ function fetchLeaderboard() {
         });
     })
     .catch(err => {
-        listDiv.innerHTML = `<div style='color:#ff4444; text-align:center; padding-top:10px; font-size:12px;'>取得エラーが発生しました。<br>詳細: ${err.message}</div>`;
+        // ★通信がSafari等で遮断された場合、自動的にブラウザ内ランキングに移行
+        console.warn("Supabaseへの接続が遮断されたため、ローカルモードに移行しました。");
+        loadLocalLeaderboard();
     });
 }
 
@@ -273,7 +300,7 @@ function update(deltaTime) {
         if (keys["ArrowLeft"] || keys["a"] || keys["A"]) { dx = -1; player.direction = "LEFT"; }
         if (keys["ArrowRight"] || keys["d"] || keys["D"]) { dx = 1; player.direction = "RIGHT"; }
 
-        // 斜め移動時の速度補正（0.7071倍）の復活
+        // 斜め移動の補正（1.4倍ダッシュの防止）
         if (dx !== 0 && dy !== 0) {
             dx *= 0.7071;
             dy *= 0.7071;
@@ -468,10 +495,10 @@ function executeDroneBarrage(dx, dy, angleToPlayer) {
             {x: -56, y: 14}, {x: -28, y: 14}, {x: 0, y: 14}, {x: 28, y: 14}, {x: 56, y: 14},
             {x: -56, y: -14}, {x: -28, y: -14}, {x: 0, y: -14}, {x: 28, y: -14}, {x: 56, y: -14},
             // 各指の関節
-            {x: -56, y: -42}, {x: -56, y: -63}, // 小指
-            {x: -21, y: -42}, {x: -21, y: -70}, // 薬指
-            {x: 14, y: -42}, {x: 14, y: -73},   // 中指
-            {x: 49, y: -42}, {x: 49, y: -67},   // 人差し指
+            {x: -56, y: -42}, {x: -56, y: -63},
+            {x: -21, y: -42}, {x: -21, y: -70},
+            {x: 14, y: -42}, {x: 14, y: -73},
+            {x: 49, y: -42}, {x: 49, y: -67},
             // 折りたたんだ親指（左に少し突き出す）
             {x: -84, y: -7}, {x: -84, y: 21}, {x: -63, y: 35}
         ];
@@ -661,7 +688,7 @@ function triggerScreenBulletPatterns(deltaTime) {
 
             const offset = (i - bulletCount / 2) * spacing;
             bullets.push({
-                x: side === "LEFT" ? -10 : canvas.width + 10, // ★構文エラーを修正済み
+                x: side === "LEFT" ? -10 : canvas.width + 10,
                 y: startY + offset,
                 vx: side === "LEFT" ? waveSpeed : -waveSpeed,
                 vy: 0,
@@ -738,7 +765,7 @@ function endGame(reason) {
     }
 }
 
-// --- 世界ランキング送信 (Supabaseへのスコア登録・エラー詳細表示機能付き) ---
+// --- 世界ランキング送信 (Supabaseへのスコア登録・自動ローカルセーブ移行) ---
 function submitScore() {
     const nameInput = document.getElementById("player-name");
     const name = nameInput.value.trim().replace(/[^a-zA-Z0-9あ-んア-ン一-龠]/g, "");
@@ -775,7 +802,12 @@ function submitScore() {
         fetchLeaderboard();
     })
     .catch(err => {
-        alert("送信エラーが発生しました。\n詳細: " + err.message);
+        // ★Safariなどのセキュリティ遮断（TypeError等）が発生した場合、自動的にブラウザ内にスコアを退避
+        console.warn("ランキング送信中にエラーが発生したため、ローカルストレージにスコアをバックアップ保存します:", err.message);
+        saveLocalScore(name, seconds, orbsCollected);
+        alert("ブラウザのセキュリティ設定により世界ランキングに直接送信できなかったため、ローカル（このPC内）に記録を保存しました！\n（Google Chromeなどでプレイすると世界ランキングに接続できます）");
+        document.getElementById("ranking-input-container").style.display = "none";
+        loadLocalLeaderboard();
     });
 }
 
