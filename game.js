@@ -1,17 +1,16 @@
 const canvas = document.getElementById("gameCanvas");
 const ctx = canvas.getContext("2d");
 
-// --- グローバルランキング設定 (dreamlo API を使用) ---
-// 先ほど取得されたご自身専用のキーを正確に設定しています。
-const DREAMLO_PUBLIC_KEY = "6a31c3eb8f40bb1318c774ac";
-const DREAMLO_PRIVATE_KEY = "Msa1Oh9DikOgg3FIjbKM1gIWyo9dx52Ei_DpJ51QN1Gw";
+// --- 世界共通ランキング設定 (Supabase を使用) ---
+const SUPABASE_URL = "https://hpsfntzpdwkxscgigcpx.supabase.co";
+const SUPABASE_KEY = "ここに先ほどコピーした sb_publishable_... のキーを貼り付けてください";
 
 // --- ゲーム設定と状態 ---
 let gameState = "TITLE";
 let currentMode = "NORMAL";
 let gameTimer = 0;
 let orbTimer = 15;
-let orbsCollected = 0;
+let orbsCollected = 0; // 取得したオーブの数
 let itemSpawned = false;
 let lastItemSpawnTime = 0;
 
@@ -64,42 +63,39 @@ const keys = {};
 window.addEventListener("keydown", e => keys[e.key] = true);
 window.addEventListener("keyup", e => keys[e.key] = false);
 
-// --- 世界ランキングの取得（セキュリティ対策 www. 付き） ---
+// --- 世界ランキングの取得（Supabase REST API 経由） ---
 function fetchLeaderboard() {
     const listDiv = document.getElementById("leaderboard-list");
     listDiv.innerHTML = "読み込み中...";
 
-    // 接続の安定性を高めるため www.dreamlo.com を宛先に指定
-    fetch(`https://www.dreamlo.com/lb/${DREAMLO_PUBLIC_KEY}/json`)
-        .then(response => response.json())
-        .then(data => {
-            listDiv.innerHTML = "";
-            if (!data.dreamlo || !data.dreamlo.leaderboard || !data.dreamlo.leaderboard.entry) {
-                listDiv.innerHTML = "<div style='color:#888; text-align:center; padding-top:20px;'>まだ記録がありません。</div>";
-                return;
-            }
+    fetch(`${SUPABASE_URL}/rest/v1/leaderboard?select=*&order=seconds.desc&limit=10`, {
+        method: "GET",
+        headers: {
+            "apikey": SUPABASE_KEY,
+            "Authorization": `Bearer ${SUPABASE_KEY}`
+        }
+    })
+    .then(response => response.json())
+    .then(data => {
+        listDiv.innerHTML = "";
+        if (!data || data.length === 0) {
+            listDiv.innerHTML = "<div style='color:#888; text-align:center; padding-top:20px;'>まだ記録がありません。</div>";
+            return;
+        }
 
-            let entries = data.dreamlo.leaderboard.entry;
-            if (!Array.isArray(entries)) {
-                entries = [entries];
-            }
-
-            entries.sort((a, b) => parseFloat(b.seconds) - parseFloat(a.seconds));
-
-            entries.slice(0, 10).forEach((entry, index) => {
-                const row = document.createElement("div");
-                row.className = "leaderboard-row";
-                const orbCount = entry.text || "0";
-                row.innerHTML = `
-                    <span>${index + 1}. ${entry.name}</span>
-                    <span>${entry.seconds}秒 (${orbCount}個)</span>
-                `;
-                listDiv.appendChild(row);
-            });
-        })
-        .catch(err => {
-            listDiv.innerHTML = "<div style='color:#ff4444; text-align:center; padding-top:20px;'>ランキングを取得できませんでした。</div>";
+        data.forEach((entry, index) => {
+            const row = document.createElement("div");
+            row.className = "leaderboard-row";
+            row.innerHTML = `
+                <span>${index + 1}. ${entry.name}</span>
+                <span>${parseFloat(entry.seconds).toFixed(2)}秒 (${entry.orbs}個)</span>
+            `;
+            listDiv.appendChild(row);
         });
+    })
+    .catch(err => {
+        listDiv.innerHTML = "<div style='color:#ff4444; text-align:center; padding-top:20px;'>ランキングを取得できませんでした。</div>";
+    });
 }
 
 fetchLeaderboard();
@@ -130,7 +126,7 @@ function startGame(mode) {
         y: canvas.height * 0.75,
         width: 32,
         height: 32,
-        hitRadius: 4,
+        hitRadius: 4, // 当たり判定の半径（極小）
         baseSpeed: 4.5,
         speed: 4.5,
         direction: "UP",
@@ -302,7 +298,7 @@ function update(deltaTime) {
             drone.direction = Math.sin(angleToPlayer) > 0 ? "DOWN" : "UP";
         }
 
-        // 弾幕パターン切り替え
+        // 弾幕パターン切り替えロジック
         if (currentMode === "HARD" || currentMode === "ENDLESS") {
             patternTimer += deltaTime;
             if (patternTimer < 7.0) {
@@ -466,7 +462,7 @@ function spawnFan(dx, dy, centerAngle, ways, spread, speed, color, spriteKey) {
     }
 }
 
-// --- 画面全体の環境弾幕 ---
+// --- 画面全体の環境弾幕（雨・横壁） ---
 function triggerScreenBulletPatterns(deltaTime) {
     let rainInterval = 0.5;
     let rainSpeed = 2.5;
@@ -496,7 +492,7 @@ function triggerScreenBulletPatterns(deltaTime) {
         waveSpeed = Math.min(5.5, 3.8 + (gameTimer / 60));
     }
 
-    // 縦の雨
+    // 縦の雨 (代替色: 青)
     rainTimer -= deltaTime;
     if (rainTimer <= 0) {
         bullets.push({
@@ -511,7 +507,7 @@ function triggerScreenBulletPatterns(deltaTime) {
         rainTimer = rainInterval;
     }
 
-    // 左右からの往復壁
+    // 左右からの往復壁 (代替色: オレンジ)
     waveTimer -= deltaTime;
     if (waveTimer <= 0 && currentMode !== "EASY") {
         const side = Math.random() > 0.5 ? "LEFT" : "RIGHT";
@@ -546,7 +542,7 @@ function applyItemEffect(type) {
     } else if (type === "life") {
         player.lives++;
     } else if (type === "freeze") {
-        drone.frozenTimer = 5.0;
+        drone.frozenTimer = 5.0; // フリーズを5秒に
     }
 }
 
@@ -603,32 +599,40 @@ function endGame(reason) {
     }
 }
 
-// --- 世界ランキング送信（セキュリティ・CORS回避設定を追加） ---
+// --- 世界ランキング送信 (Supabaseへのスコア登録) ---
 function submitScore() {
     const nameInput = document.getElementById("player-name");
-    const name = nameInput.value.trim().replace(/[^a-zA-Z0-9]/g, "");
+    const name = nameInput.value.trim().replace(/[^a-zA-Z0-9あ-んア-ン一-龠]/g, "");
 
     if (!name) {
-        alert("名前を入力してください（半角英数のみ有効）。");
+        alert("名前を入力してください。");
         return;
     }
 
-    const seconds = gameTimer.toFixed(2);
-    const scoreVal = Math.floor(gameTimer * 100);
+    const seconds = parseFloat(gameTimer.toFixed(2));
 
-    // 通信エラーを防ぐため www.dreamlo.com 宛てに設定
-    const url = `https://www.dreamlo.com/lb/${DREAMLO_PRIVATE_KEY}/add/${name}/${scoreVal}/${seconds}/${orbsCollected}`;
-
-    // ★重要: browserのCORSブロックを完全に無視する { mode: 'no-cors' } を設定して送信
-    fetch(url, { mode: 'no-cors' })
-        .then(() => {
-            alert("世界ランキングに記録が登録されました！");
-            document.getElementById("ranking-input-container").style.display = "none";
-            fetchLeaderboard(); // 送信完了後にランキングを再描画
+    fetch(`${SUPABASE_URL}/rest/v1/leaderboard`, {
+        method: "POST",
+        headers: {
+            "apikey": SUPABASE_KEY,
+            "Authorization": `Bearer ${SUPABASE_KEY}`,
+            "Content-Type": "application/json",
+            "Prefer": "return=minimal"
+        },
+        body: JSON.stringify({
+            name: name,
+            seconds: seconds,
+            orbs: orbsCollected
         })
-        .catch(err => {
-            alert("通信環境により送信できませんでした。");
-        });
+    })
+    .then(() => {
+        alert("世界ランキングに記録が登録されました！");
+        document.getElementById("ranking-input-container").style.display = "none";
+        fetchLeaderboard(); // 送信後に最新ランキングをロード
+    })
+    .catch(err => {
+        alert("送信エラーが発生しました。");
+    });
 }
 
 // --- 描画ロジック ---
@@ -681,6 +685,7 @@ function drawDrone() {
     }
 }
 
+// 弾幕を円形にクリップして描画するロジック
 function drawBullets() {
     bullets.forEach(b => {
         const img = images[b.spriteKey];
