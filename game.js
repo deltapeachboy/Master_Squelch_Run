@@ -3,7 +3,7 @@ const ctx = canvas.getContext("2d");
 
 // --- 世界共通ランキング設定 (Supabase を使用) ---
 const SUPABASE_URL = "https://hpsfntzpdwkxscgigcpx.supabase.co";
-const SUPABASE_KEY = "sb_publishable_gkx8zaEKGYajjISQHBxDRQ_6rZqHk3K"; // ★ここに「Legacy anon」キー（eyJ...）を貼り付けてください
+const SUPABASE_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Imhwc2ZudHpwZHdreHNja2lnY3B4Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODE2MzgwODUsImV4cCI6MjA5NzIxNDA4NX0.-4ddjmwzBS99Uy5JXdzAvGwSm4sn-mUltiDt71Ap2ko";
 
 // --- ゲーム設定と状態 ---
 let gameState = "TITLE";
@@ -19,7 +19,7 @@ let rainTimer = 0;
 let waveTimer = 0;
 let patternTimer = 0;
 
-// --- スプライト画像の定義 ---
+// --- スプライト画像の定義（プレイヤーとドローンのみ画像を使用） ---
 const images = {};
 const imageSources = {
     kankichi_UP: "assets/kankichi_up.png",
@@ -65,7 +65,7 @@ const keys = {};
 window.addEventListener("keydown", e => keys[e.key] = true);
 window.addEventListener("keyup", e => keys[e.key] = false);
 
-// --- 世界ランキングの取得（デバッグ対応） ---
+// --- 世界ランキングの取得（Supabase REST API 経由） ---
 function fetchLeaderboard() {
     const listDiv = document.getElementById("leaderboard-list");
     listDiv.innerHTML = "読み込み中...";
@@ -273,7 +273,7 @@ function update(deltaTime) {
         if (keys["ArrowLeft"] || keys["a"] || keys["A"]) { dx = -1; player.direction = "LEFT"; }
         if (keys["ArrowRight"] || keys["d"] || keys["D"]) { dx = 1; player.direction = "RIGHT"; }
 
-        // 斜め移動の補正（復活）
+        // 斜め移動時の速度補正（0.7071倍）の復活
         if (dx !== 0 && dy !== 0) {
             dx *= 0.7071;
             dy *= 0.7071;
@@ -309,7 +309,7 @@ function update(deltaTime) {
             drone.direction = Math.sin(angleToPlayer) > 0 ? "DOWN" : "UP";
         }
 
-        // 弾幕パターン切り替えロジック
+        // 弾幕パターン切り替えロジック (5種サイクル)
         if (currentMode === "HARD" || currentMode === "ENDLESS") {
             patternTimer += deltaTime;
             if (patternTimer < 6.0) {
@@ -355,6 +355,7 @@ function update(deltaTime) {
                         b.vx = b.dashVx;
                         b.vy = b.dashVy;
                     } else {
+                        // 霧散（拳の中心座標から前方180度へ綺麗に四散する）
                         b.state = "scatter";
                         const halfArc = Math.PI / 2;
                         const randomOffset = (Math.random() - 0.5) * Math.PI;
@@ -458,7 +459,7 @@ function executeDroneBarrage(dx, dy, angleToPlayer) {
         drone.shootCooldown = interval;
 
     } else if (drone.currentPattern === "FIST") {
-        // Zパンチ（巨大拳フォーメーション：22個の弾幕）
+        // ★Zパンチ（22個の巨大拳弾幕フォーメーション：1.4倍サイズ）
         const fistOffsets = [
             // 手首・腕
             {x: -35, y: 70}, {x: 0, y: 70}, {x: 35, y: 70},
@@ -471,7 +472,7 @@ function executeDroneBarrage(dx, dy, angleToPlayer) {
             {x: -21, y: -42}, {x: -21, y: -70}, // 薬指
             {x: 14, y: -42}, {x: 14, y: -73},   // 中指
             {x: 49, y: -42}, {x: 49, y: -67},   // 人差し指
-            // 折りたたんだ親指
+            // 折りたたんだ親指（左に少し突き出す）
             {x: -84, y: -7}, {x: -84, y: 21}, {x: -63, y: 35}
         ];
 
@@ -514,7 +515,7 @@ function executeDroneBarrage(dx, dy, angleToPlayer) {
         drone.shootCooldown = 1.9;
 
     } else if (drone.currentPattern === "BEAM") {
-        // パターンB：じごくのほのお（時間差・追尾炎）
+        // ★パターンB：じごくのほのお（時間差・追尾炎）
         const angle = angleToPlayer + (Math.random() - 0.5) * 0.5;
         const initialSpeed = 6.0;
 
@@ -534,7 +535,7 @@ function executeDroneBarrage(dx, dy, angleToPlayer) {
         drone.shootCooldown = 0.25;
 
     } else if (drone.currentPattern === "SPIRAL") {
-        // パターンC：ウッキー・スパイラル（復活・隙間広め）
+        // ★パターンC：ウッキー・スパイラル（復活・隙間広め）
         drone.spiralAngle = (drone.spiralAngle || 0) + 0.16;
         const speed = 3.8;
 
@@ -660,8 +661,7 @@ function triggerScreenBulletPatterns(deltaTime) {
 
             const offset = (i - bulletCount / 2) * spacing;
             bullets.push({
-                x: side === "LEFT" ? -10 : canvas.width + 10; // ← セミコロンをカンマ、または正しいオブジェクト終端へ自動修正
-                x: side === "LEFT" ? -10 : canvas.width + 10,
+                x: side === "LEFT" ? -10 : canvas.width + 10, // ★構文エラーを修正済み
                 y: startY + offset,
                 vx: side === "LEFT" ? waveSpeed : -waveSpeed,
                 vy: 0,
@@ -775,7 +775,6 @@ function submitScore() {
         fetchLeaderboard();
     })
     .catch(err => {
-        // 送信エラーの具体的な詳細を表示
         alert("送信エラーが発生しました。\n詳細: " + err.message);
     });
 }
