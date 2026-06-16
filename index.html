@@ -20,7 +20,7 @@
                     <button onclick="startGame('ENDLESS')">エンドレス (無限)</button>
                 </div>
                 <div class="leaderboard-container">
-                    <h3>🏆 世界ランキング (エンドレス)</h3>
+                    <h3>🏆 ローカルランキング (エンドレス)</h3>
                     <div id="leaderboard-list">読み込み中...</div>
                 </div>
             </div>
@@ -41,10 +41,10 @@
                 <button id="continue-button" class="accent-btn" onclick="continueGame()">コンティニューする</button>
             </div>
 
-            <!-- スコア送信フォーム（エンドレス時のみ表示） -->
+            <!-- スコア保存フォーム（エンドレス時のみ表示） -->
             <div id="ranking-input-container" style="display: none; margin-bottom: 20px;">
-                <input type="text" id="player-name" placeholder="名前を入力（半角英数推奨）" maxlength="10">
-                <button onclick="submitScore()">スコアを送信</button>
+                <input type="text" id="player-name" placeholder="名前を入力" maxlength="10">
+                <button onclick="submitLocalScore()">スコアを保存</button>
             </div>
 
             <button onclick="showMenu()">メニューに戻る</button>

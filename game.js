@@ -1,10 +1,6 @@
 const canvas = document.getElementById("gameCanvas");
 const ctx = canvas.getContext("2d");
 
-// --- 世界共通ランキング設定 (Supabase を使用) ---
-const SUPABASE_URL = "https://hpsfntzpdwkxscgigcpx.supabase.co";
-const SUPABASE_KEY = "ここに先ほどコピーした sb_publishable_... のキーを貼り付けてください";
-
 // --- ゲーム設定と状態 ---
 let gameState = "TITLE";
 let currentMode = "NORMAL";
@@ -19,7 +15,7 @@ let rainTimer = 0;
 let waveTimer = 0;
 let patternTimer = 0;
 
-// --- スプライト画像の定義（プレイヤーとドローンのみ画像を使用） ---
+// --- スプライト画像の定義 ---
 const images = {};
 const imageSources = {
     kankichi_UP: "assets/kankichi_up.png",
@@ -29,7 +25,15 @@ const imageSources = {
     drone_UP: "assets/drone_up.png",
     drone_DOWN: "assets/drone_down.png",
     drone_LEFT: "assets/drone_left.png",
-    drone_RIGHT: "assets/drone_right.png"
+    drone_RIGHT: "assets/drone_right.png",
+    item_speed: "assets/item_speed.png",
+    item_life: "assets/item_life.png",
+    item_freeze: "assets/item_freeze.png",
+    bullet_blue: "assets/bullet_blue.png",
+    bullet_green: "assets/bullet_green.png",
+    bullet_pink: "assets/bullet_pink.png",
+    bullet_rain: "assets/bullet_rain.png",
+    bullet_wall: "assets/bullet_wall.png"
 };
 
 Object.keys(imageSources).forEach(key => {
@@ -39,10 +43,105 @@ Object.keys(imageSources).forEach(key => {
     images[key].onerror = () => { images[key].loaded = false; };
 });
 
-// --- キャラクター・オブジェクト of 定義 ---
+// --- Safari高速化用：オフスクリーンキャッシュシステム ---
+const offscreenCache = {};
+
+// 画像が読み込めなかった場合の動的ベクターキャッシュ作成
+function getFallbackSprite(color, radius) {
+    const key = `${color}_${radius}`;
+    if (offscreenCache[key]) return offscreenCache[key];
+
+    const size = Math.round(radius * 2) + 4;
+    const offCanvas = document.createElement("canvas");
+    offCanvas.width = size;
+    offCanvas.height = size;
+    const oCtx = offCanvas.getContext("2d");
+
+    oCtx.beginPath();
+    oCtx.arc(size / 2, size / 2, radius, 0, Math.PI * 2);
+    oCtx.fillStyle = color;
+    oCtx.fill();
+    oCtx.closePath();
+
+    offscreenCache[key] = offCanvas;
+    return offCanvas;
+}
+
+// 闇のオーブのプリレンダリングキャッシュ
+let orbCanvas = null;
+function preRenderDarkOrb() {
+    orbCanvas = document.createElement("canvas");
+    orbCanvas.width = 40;
+    orbCanvas.height = 40;
+    const oCtx = orbCanvas.getContext("2d");
+
+    // 1層目
+    oCtx.beginPath();
+    oCtx.arc(20, 20, 12 * 1.3, 0, Math.PI * 2);
+    oCtx.fillStyle = "rgba(170, 0, 255, 0.25)";
+    oCtx.fill();
+    oCtx.closePath();
+
+    // コア
+    oCtx.beginPath();
+    oCtx.arc(20, 20, 12, 0, Math.PI * 2);
+    oCtx.fillStyle = "#aa00ff";
+    oCtx.fill();
+    oCtx.closePath();
+}
+preRenderDarkOrb();
+
+// --- 弾丸のオブジェクトプール（GCスパイク完全防止） ---
+const MAX_BULLETS = 600;
+const bulletPool = [];
+for (let i = 0; i < MAX_BULLETS; i++) {
+    bulletPool.push({
+        active: false,
+        x: 0, y: 0,
+        vx: 0, vy: 0,
+        radius: 0,
+        color: "",
+        img: null,
+        fallback: null,
+        type: "",
+        state: "",
+        timer: 0,
+        action: "",
+        dashVx: 0, dashVy: 0,
+        targetAngle: 0
+    });
+}
+
+// プールから不活性な弾を取得して有効化
+function spawnBullet(x, y, vx, vy, radius, color, imgKey, type = "", state = "") {
+    for (let i = 0; i < MAX_BULLETS; i++) {
+        const b = bulletPool[i];
+        if (!b.active) {
+            b.active = true;
+            b.x = x;
+            b.y = y;
+            b.vx = vx;
+            b.vy = vy;
+            b.radius = radius;
+            b.color = color;
+            b.img = images[imgKey] || null;
+            b.fallback = getFallbackSprite(color, radius);
+            b.type = type;
+            b.state = state;
+            b.timer = 0;
+            b.action = "";
+            b.dashVx = 0;
+            b.dashVy = 0;
+            b.targetAngle = 0;
+            return b;
+        }
+    }
+    return null; // プール空きなし時のセーフティ
+}
+
+// --- キャラクター・オブジェクトの定義 ---
 let player = {};
 let drone = {};
-let bullets = [];
 let darkOrb = {};
 let activeItem = null;
 
@@ -51,52 +150,7 @@ const keys = {};
 window.addEventListener("keydown", e => keys[e.key] = true);
 window.addEventListener("keyup", e => keys[e.key] = false);
 
-// --- 世界ランキングの取得（Supabase REST API 経由） ---
-function fetchLeaderboard() {
-    const listDiv = document.getElementById("leaderboard-list");
-    listDiv.innerHTML = "読み込み中...";
-
-    fetch(`${SUPABASE_URL}/rest/v1/leaderboard?select=*&order=seconds.desc&limit=10`, {
-        method: "GET",
-        headers: {
-            "apikey": SUPABASE_KEY,
-            "Authorization": `Bearer ${SUPABASE_KEY}`
-        }
-    })
-    .then(response => {
-        if (!response.ok) {
-            return response.text().then(text => {
-                throw new Error(`HTTP ${response.status}: ${text}`);
-            });
-        }
-        return response.json();
-    })
-    .then(data => {
-        listDiv.innerHTML = "";
-        if (!data || data.length === 0) {
-            listDiv.innerHTML = "<div style='color:#888; text-align:center; padding-top:20px;'>まだ記録がありません。<br>エンドレスに挑戦して記録を残そう！</div>";
-            return;
-        }
-
-        data.forEach((entry, index) => {
-            const row = document.createElement("div");
-            row.className = "leaderboard-row";
-            const orbCount = entry.text || "0";
-            row.innerHTML = `
-                <span>${index + 1}. ${entry.name}</span>
-                <span>${parseFloat(entry.seconds).toFixed(2)}秒 (${orbCount}個)</span>
-            `;
-            listDiv.appendChild(row);
-        });
-    })
-    .catch(err => {
-        // Safari等で通信が遮断された場合はローカルランキングを表示
-        console.warn("Supabase接続不可のためローカル表示に切り替えました。");
-        loadLocalLeaderboard();
-    });
-}
-
-// --- ローカルランキング表示用（フォールバック用） ---
+// --- ローカルランキング表示用 ---
 function loadLocalLeaderboard() {
     const listDiv = document.getElementById("leaderboard-list");
     listDiv.innerHTML = "";
@@ -108,7 +162,7 @@ function loadLocalLeaderboard() {
     }
 
     if (entries.length === 0) {
-        listDiv.innerHTML = "<div style='color:#888; text-align:center; padding-top:20px;'>世界ランキングがブロックされたため、ローカルモードで動作中。<br>（まだ記録がありません）</div>";
+        listDiv.innerHTML = "<div style='color:#888; text-align:center; padding-top:20px;'>まだ記録がありません。<br>エンドレスに挑戦して記録を残そう！</div>";
         return;
     }
 
@@ -118,7 +172,7 @@ function loadLocalLeaderboard() {
         const row = document.createElement("div");
         row.className = "leaderboard-row";
         row.innerHTML = `
-            <span>${index + 1}. ${entry.name} (ローカル)</span>
+            <span>${index + 1}. ${entry.name}</span>
             <span>${entry.seconds.toFixed(2)}秒 (${entry.orbs}個)</span>
         `;
         listDiv.appendChild(row);
@@ -135,7 +189,7 @@ function saveLocalScore(name, seconds, orbs) {
     localStorage.setItem("kankichi_local_leaderboard", JSON.stringify(entries));
 }
 
-fetchLeaderboard();
+loadLocalLeaderboard();
 
 // --- ゲーム開始 ---
 function startGame(mode) {
@@ -146,8 +200,12 @@ function startGame(mode) {
     orbsCollected = 0;
     itemSpawned = false;
     lastItemSpawnTime = 0;
-    bullets = [];
     activeItem = null;
+
+    // すべての弾丸をリセット
+    for (let i = 0; i < MAX_BULLETS; i++) {
+        bulletPool[i].active = false;
+    }
 
     rainTimer = 0;
     waveTimer = 0;
@@ -207,16 +265,18 @@ function showMenu() {
     document.getElementById("gameover-screen").style.display = "none";
     document.getElementById("clear-screen").style.display = "none";
     canvas.style.display = "none";
-    fetchLeaderboard();
+    loadLocalLeaderboard();
 }
 
 function spawnDarkOrb() {
-    let rx, ry, dist;
+    let rx, ry, distSq;
     do {
         rx = Math.random() * (canvas.width - 80) + 40;
         ry = Math.random() * (canvas.height - 120) + 60;
-        dist = Math.hypot(player.x - rx, player.y - ry);
-    } while (dist < 150);
+        const dx = player.x - rx;
+        const dy = player.y - ry;
+        distSq = dx * dx + dy * dy; // 高速な2乗比較
+    } while (distSq < 22500); // 150の2乗
 
     darkOrb = { x: rx, y: ry, radius: 12 };
 }
@@ -300,7 +360,6 @@ function update(deltaTime) {
         if (keys["ArrowLeft"] || keys["a"] || keys["A"]) { dx = -1; player.direction = "LEFT"; }
         if (keys["ArrowRight"] || keys["d"] || keys["D"]) { dx = 1; player.direction = "RIGHT"; }
 
-        // 斜め移動時の速度補正（0.7071倍）の復活
         if (dx !== 0 && dy !== 0) {
             dx *= 0.7071;
             dy *= 0.7071;
@@ -336,7 +395,6 @@ function update(deltaTime) {
             drone.direction = Math.sin(angleToPlayer) > 0 ? "DOWN" : "UP";
         }
 
-        // 弾幕パターン切り替えロジック (5種サイクル)
         if (currentMode === "HARD" || currentMode === "ENDLESS") {
             patternTimer += deltaTime;
             if (patternTimer < 6.0) {
@@ -356,7 +414,6 @@ function update(deltaTime) {
             drone.currentPattern = "CLASSIC";
         }
 
-        // 弾幕発射
         drone.shootCooldown -= deltaTime;
         if (drone.shootCooldown <= 0) {
             executeDroneBarrage(dCenterX, dCenterY, angleToPlayer);
@@ -368,11 +425,12 @@ function update(deltaTime) {
         triggerScreenBulletPatterns(deltaTime);
     }
 
-    // 弾の更新（移動処理と消去判定、および特殊弾幕のタメ・時間差・分裂制御）
-    for (let i = bullets.length - 1; i >= 0; i--) {
-        const b = bullets[i];
+    // 弾の物理更新
+    for (let i = 0; i < MAX_BULLETS; i++) {
+        const b = bulletPool[i];
+        if (!b.active) continue;
 
-        // Zパンチ（拳フォーメーション）の挙動制御
+        // Zパンチ制御
         if (b.type === "fist_part") {
             if (b.state === "charge") {
                 b.timer -= deltaTime;
@@ -383,7 +441,6 @@ function update(deltaTime) {
                         b.vy = b.dashVy;
                     } else {
                         b.state = "scatter";
-                        const halfArc = Math.PI / 2;
                         const randomOffset = (Math.random() - 0.5) * Math.PI;
                         const scatterAngle = b.targetAngle + randomOffset;
                         const speed = 4.5;
@@ -393,12 +450,12 @@ function update(deltaTime) {
                 }
             }
         }
-        // じごくのほのおの挙動（タメ減速から追尾急加速）
+        // じごくのほのお制御
         else if (b.type === "delayed_flame") {
             if (b.state === "slowdown") {
                 b.vx *= 0.88;
                 b.vy *= 0.88;
-                if (Math.hypot(b.vx, b.vy) < 0.2) {
+                if (b.vx * b.vx + b.vy * b.vy < 0.04) {
                     b.vx = 0; b.vy = 0;
                     b.state = "hover";
                     b.timer = 0.6;
@@ -419,8 +476,9 @@ function update(deltaTime) {
         b.x += b.vx;
         b.y += b.vy;
 
-        if (b.toRemove || b.x < -40 || b.x > canvas.width + 40 || b.y < -40 || b.y > canvas.height + 40) {
-            bullets.splice(i, 1);
+        // 画面外への離脱判定
+        if (b.x < -40 || b.x > canvas.width + 40 || b.y < -40 || b.y > canvas.height + 40) {
+            b.active = false;
         }
     }
 
@@ -429,8 +487,11 @@ function update(deltaTime) {
     const playerCenterY = player.y + player.height / 2;
 
     // 1. 闇のオーブ
-    const distToOrb = Math.hypot(playerCenterX - darkOrb.x, playerCenterY - darkOrb.y);
-    if (distToOrb < (16 + darkOrb.radius)) {
+    const dxOrb = playerCenterX - darkOrb.x;
+    const dyOrb = playerCenterY - darkOrb.y;
+    const distOrbSq = dxOrb * dxOrb + dyOrb * dyOrb;
+    const touchOrbRad = 16 + darkOrb.radius;
+    if (distOrbSq < touchOrbRad * touchOrbRad) {
         orbsCollected++;
         spawnDarkOrb();
         orbTimer = 15.0;
@@ -440,24 +501,33 @@ function update(deltaTime) {
     if (activeItem) {
         const itemCenterX = activeItem.x + activeItem.width / 2;
         const itemCenterY = activeItem.y + activeItem.height / 2;
-        const distToItem = Math.hypot(playerCenterX - itemCenterX, playerCenterY - itemCenterY);
-        if (distToItem < (16 + activeItem.width / 2)) {
+        const dxItem = playerCenterX - itemCenterX;
+        const dyItem = playerCenterY - itemCenterY;
+        const distItemSq = dxItem * dxItem + dyItem * dyItem;
+        const touchItemRad = 16 + activeItem.width / 2;
+        if (distItemSq < touchItemRad * touchItemRad) {
             applyItemEffect(activeItem.type);
             activeItem = null;
         }
     }
 
-    // 3. 弾との当たり判定
+    // 3. 弾との当たり判定 (高負荷ループ内のためMath.hypotを排除し、完全2乗距離で計算)
     if (!player.isInvincible && !player.isStunned) {
-        for (let i = 0; i < bullets.length; i++) {
-            const b = bullets[i];
-            const distToBullet = Math.hypot(playerCenterX - b.x, playerCenterY - b.y);
-            if (distToBullet < (player.hitRadius + b.radius)) {
+        for (let i = 0; i < MAX_BULLETS; i++) {
+            const b = bulletPool[i];
+            if (!b.active) continue;
+
+            const dx = playerCenterX - b.x;
+            const dy = playerCenterY - b.y;
+            const distSq = dx * dx + dy * dy;
+            const limitRad = player.hitRadius + b.radius;
+
+            if (distSq < limitRad * limitRad) {
                 player.isStunned = true;
                 player.stunTimer = 2.0;
                 player.isInvincible = true;
                 player.invincibleTimer = 4.0;
-                bullets.splice(i, 1);
+                b.active = false; // 弾丸消滅
                 break;
             }
         }
@@ -466,8 +536,11 @@ function update(deltaTime) {
     // 4. ドローンZ本体との衝突
     const droneCenterX = drone.x + drone.width / 2;
     const droneCenterY = drone.y + drone.height / 2;
-    const distToDrone = Math.hypot(playerCenterX - droneCenterX, playerCenterY - droneCenterY);
-    if (distToDrone < (player.hitRadius + 16)) {
+    const dxDrone = playerCenterX - droneCenterX;
+    const dyDrone = playerCenterY - droneCenterY;
+    const distDroneSq = dxDrone * dxDrone + dyDrone * dyDrone;
+    const touchDroneRad = player.hitRadius + 16;
+    if (distDroneSq < touchDroneRad * touchDroneRad) {
         endGame("DRONE_CONTACT");
     }
 }
@@ -480,11 +553,10 @@ function executeDroneBarrage(dx, dy, angleToPlayer) {
         let bulletSpeed = currentMode === "EASY" ? 3.2 : 4.5;
         let interval = currentMode === "EASY" ? 1.8 : 1.2;
 
-        spawnFan(dx, dy, angleToPlayer, ways, spread, bulletSpeed, "#ffbb00");
+        spawnFan(dx, dy, angleToPlayer, ways, spread, bulletSpeed, "#ffbb00", "bullet_green");
         drone.shootCooldown = interval;
 
     } else if (drone.currentPattern === "FIST") {
-        // Zパンチ（巨大拳フォーメーション：22個の弾幕）
         const fistOffsets = [
             {x: -35, y: 70}, {x: 0, y: 70}, {x: 35, y: 70},
             {x: -35, y: 42}, {x: 0, y: 42}, {x: 35, y: 42},
@@ -512,58 +584,35 @@ function executeDroneBarrage(dx, dy, angleToPlayer) {
         }
 
         fistOffsets.forEach(offset => {
-            bullets.push({
-                type: "fist_part",
-                state: "charge",
-                timer: 1.0,
-                x: dx + offset.x,
-                y: dy + offset.y,
-                centerX: dx,
-                centerY: dy,
-                vx: 0,
-                vy: 0,
-                radius: 7.0,
-                color: "#00b7ff",
-                action: action,
-                dashVx: dashVx,
-                dashVy: dashVy,
-                targetAngle: targetAngle
-            });
+            const b = spawnBullet(dx + offset.x, dy + offset.y, 0, 0, 7.0, "#00b7ff", "bullet_blue", "fist_part", "charge");
+            if (b) {
+                b.timer = 1.0;
+                b.action = action;
+                b.dashVx = dashVx;
+                b.dashVy = dashVy;
+                b.targetAngle = targetAngle;
+            }
         });
 
         drone.shootCooldown = 1.9;
 
     } else if (drone.currentPattern === "BEAM") {
-        // パターンB：じごくのほのお（時間差・追尾炎）
         const angle = angleToPlayer + (Math.random() - 0.5) * 0.5;
         const initialSpeed = 6.0;
 
-        bullets.push({
-            type: "delayed_flame",
-            state: "slowdown",
-            timer: 0,
-            x: dx,
-            y: dy,
-            vx: Math.cos(angle) * initialSpeed,
-            vy: Math.sin(angle) * initialSpeed,
-            radius: 7,
-            color: "#ff6600"
-        });
-
+        spawnBullet(dx, dy, Math.cos(angle) * initialSpeed, Math.sin(angle) * initialSpeed, 7, "#ff6600", "bullet_pink", "delayed_flame", "slowdown");
         drone.shootCooldown = 0.25;
 
     } else if (drone.currentPattern === "SPIRAL") {
-        // パターンC：ウッキー・スパイラル（復活・隙間広め）
         drone.spiralAngle = (drone.spiralAngle || 0) + 0.16;
         const speed = 3.8;
 
-        bullets.push({ x: dx, y: dy, vx: Math.cos(drone.spiralAngle) * speed, vy: Math.sin(drone.spiralAngle) * speed, radius: 5, color: "#00b7ff" });
-        bullets.push({ x: dx, y: dy, vx: Math.cos(drone.spiralAngle + Math.PI) * speed, vy: Math.sin(drone.spiralAngle + Math.PI) * speed, radius: 5, color: "#00b7ff" });
+        spawnBullet(dx, dy, Math.cos(drone.spiralAngle) * speed, Math.sin(drone.spiralAngle) * speed, 5, "#00b7ff", "bullet_blue");
+        spawnBullet(dx, dy, Math.cos(drone.spiralAngle + Math.PI) * speed, Math.sin(drone.spiralAngle + Math.PI) * speed, 5, "#00b7ff", "bullet_blue");
 
         drone.shootCooldown = 0.14;
 
     } else if (drone.currentPattern === "SWEEP") {
-        // パターンD：ヴァイパー・スイープ（復活）
         drone.sweepAngleOffset = (drone.sweepAngleOffset || 0) + (0.05 * drone.sweepDirection);
         if (Math.abs(drone.sweepAngleOffset) > 0.6) {
             drone.sweepDirection *= -1;
@@ -574,45 +623,30 @@ function executeDroneBarrage(dx, dy, angleToPlayer) {
         const spread = 0.26;
         const speed = 4.5;
 
-        spawnFan(dx, dy, currentAngle, ways, spread, speed, "#ff00bb");
+        spawnFan(dx, dy, currentAngle, ways, spread, speed, "#ff00bb", "bullet_pink");
         drone.shootCooldown = 0.4;
 
     } else if (drone.currentPattern === "FLOWER") {
-        // パターンE：ふくびきけん・キャットバースト（復活）
         const numBullets = 10;
         const speed = 3.0;
         const offsetAngle = gameTimer * 1.5;
 
         for (let i = 0; i < numBullets; i++) {
             const angle = (Math.PI * 2 / numBullets) * i + offsetAngle;
-            bullets.push({
-                x: dx,
-                y: dy,
-                vx: Math.cos(angle) * speed,
-                vy: Math.sin(angle) * speed,
-                radius: 6,
-                color: "#00ffaa"
-            });
+            spawnBullet(dx, dy, Math.cos(angle) * speed, Math.sin(angle) * speed, 6, "#00ffaa", "bullet_green");
         }
         drone.shootCooldown = 0.9;
     }
 }
 
 // 扇状展開のヘルパー関数
-function spawnFan(dx, dy, centerAngle, ways, spread, speed, color) {
+function spawnFan(dx, dy, centerAngle, ways, spread, speed, color, spriteName = "bullet_green") {
     const startIdx = -Math.floor(ways / 2);
     const endIdx = Math.floor(ways / 2);
 
     for (let i = startIdx; i <= endIdx; i++) {
         const bulletAngle = centerAngle + (i * spread);
-        bullets.push({
-            x: dx,
-            y: dy,
-            vx: Math.cos(bulletAngle) * speed,
-            vy: Math.sin(bulletAngle) * speed,
-            radius: 6,
-            color: color
-        });
+        spawnBullet(dx, dy, Math.cos(bulletAngle) * speed, Math.sin(bulletAngle) * speed, 6, color, spriteName);
     }
 }
 
@@ -646,21 +680,14 @@ function triggerScreenBulletPatterns(deltaTime) {
         waveSpeed = Math.min(5.5, 3.8 + (gameTimer / 60));
     }
 
-    // 縦の雨 (代替色: 青)
+    // 縦の雨
     rainTimer -= deltaTime;
     if (rainTimer <= 0) {
-        bullets.push({
-            x: Math.random() * canvas.width,
-            y: -10,
-            vx: (Math.random() - 0.5) * 0.6,
-            vy: rainSpeed,
-            radius: 5,
-            color: "#4488ff"
-        });
+        spawnBullet(Math.random() * canvas.width, -10, (Math.random() - 0.5) * 0.6, rainSpeed, 5, "#4488ff", "bullet_rain");
         rainTimer = rainInterval;
     }
 
-    // 左右からの往復壁 (代替色: オレンジ)
+    // 左右からの往復壁
     waveTimer -= deltaTime;
     if (waveTimer <= 0 && currentMode !== "EASY") {
         const side = Math.random() > 0.5 ? "LEFT" : "RIGHT";
@@ -674,14 +701,15 @@ function triggerScreenBulletPatterns(deltaTime) {
             if (i === gateIndex) continue;
 
             const offset = (i - bulletCount / 2) * spacing;
-            bullets.push({
-                x: side === "LEFT" ? -10 : canvas.width + 10,
-                y: startY + offset,
-                vx: side === "LEFT" ? waveSpeed : -waveSpeed,
-                vy: 0,
-                radius: 6,
-                color: "#ff7700"
-            });
+            spawnBullet(
+                side === "LEFT" ? -10 : canvas.width + 10,
+                startY + offset,
+                side === "LEFT" ? waveSpeed : -waveSpeed,
+                0,
+                6,
+                "#ff7700",
+                "bullet_wall"
+            );
         }
         waveTimer = waveInterval;
     }
@@ -714,7 +742,9 @@ function continueGame() {
     initDrone();
     drone.frozenTimer = 2.0;
 
-    bullets = [];
+    for (let i = 0; i < MAX_BULLETS; i++) {
+        bulletPool[i].active = false;
+    }
 
     document.getElementById("gameover-screen").style.display = "none";
     canvas.style.display = "block";
@@ -751,70 +781,40 @@ function endGame(reason) {
     }
 }
 
-// --- 世界ランキング送信 (Supabaseへのスコア登録・自動ローカルセーブ移行) ---
-function submitScore() {
+// --- ローカルランキングへの保存処理 ---
+function submitLocalScore() {
     const nameInput = document.getElementById("player-name");
-    const name = nameInput.value.trim().replace(/[^a-zA-Z0-9あ-んア-ン一-龠]/g, "");
-
-    if (!name) {
-        alert("名前を入力してください。");
-        return;
-    }
-
+    const name = nameInput.value.trim().replace(/[^a-zA-Z0-9あ-んア-ン一-龠]/g, "") || "名無し";
     const seconds = parseFloat(gameTimer.toFixed(2));
 
-    fetch(`${SUPABASE_URL}/rest/v1/leaderboard`, {
-        method: "POST",
-        headers: {
-            "apikey": SUPABASE_KEY,
-            "Authorization": `Bearer ${SUPABASE_KEY}`,
-            "Content-Type": "application/json",
-            "Prefer": "return=minimal"
-        },
-        body: JSON.stringify({
-            name: name,
-            seconds: seconds,
-            orbs: orbsCollected
-        })
-    })
-    .then(response => {
-        if (!response.ok) {
-            return response.text().then(text => {
-                throw new Error(`HTTP ${response.status}: ${text}`);
-            });
-        }
-        alert("世界ランキングに記録が登録されました！");
-        document.getElementById("ranking-input-container").style.display = "none";
-        fetchLeaderboard();
-    })
-    .catch(err => {
-        // ★Safari等のセキュリティによる通信強制遮断（TypeError等）が発生した場合、自動的にブラウザ内にスコアを退避
-        console.warn("ランキング送信中にエラーが発生したため、自動的にローカルにセーブされました:", err.message);
-        saveLocalScore(name, seconds, orbsCollected);
-        alert("ブラウザのセキュリティ設定により世界ランキングに直接送信できなかったため、ローカル（このPC内）に記録を保存しました！");
-        document.getElementById("ranking-input-container").style.display = "none";
-        loadLocalLeaderboard();
-    });
+    saveLocalScore(name, seconds, orbsCollected);
+    alert("ランキングに記録が保存されました！");
+    document.getElementById("ranking-input-container").style.display = "none";
+    loadLocalLeaderboard();
 }
 
 // --- 描画ロジック ---
 function drawPlayer() {
     const key = `kankichi_${player.direction}`;
+    const rx = Math.round(player.x);
+    const ry = Math.round(player.y);
+
     if (images[key] && images[key].loaded) {
         if (player.isStunned && Math.floor(gameTimer * 10) % 2 === 0) return;
         if (player.isInvincible && Math.floor(gameTimer * 15) % 2 === 0) ctx.globalAlpha = 0.5;
 
-        ctx.drawImage(images[key], player.x, player.y, player.width, player.height);
+        ctx.drawImage(images[key], rx, ry, player.width, player.height);
         ctx.globalAlpha = 1.0;
     } else {
-        // 画像未読み込み時のドット絵風ベクター（高品質な青い自機を描画）
         ctx.save();
         if (player.isStunned && Math.floor(gameTimer * 10) % 2 === 0) return;
         if (player.isInvincible && Math.floor(gameTimer * 15) % 2 === 0) ctx.globalAlpha = 0.5;
 
-        // メインボディ
+        const cx = Math.round(player.x + player.width / 2);
+        const cy = Math.round(player.y + player.height / 2);
+
         ctx.beginPath();
-        ctx.arc(player.x + player.width/2, player.y + player.height/2, player.width/2, 0, Math.PI * 2);
+        ctx.arc(cx, cy, player.width / 2, 0, Math.PI * 2);
         ctx.fillStyle = "#3366ff";
         ctx.strokeStyle = "#ffffff";
         ctx.lineWidth = 2;
@@ -822,25 +822,12 @@ function drawPlayer() {
         ctx.stroke();
         ctx.closePath();
 
-        // コックピット（内側の光る円）
-        ctx.beginPath();
-        ctx.arc(player.x + player.width/2, player.y + player.height/2, player.width/4, 0, Math.PI * 2);
-        ctx.fillStyle = "#00ffff";
-        ctx.fill();
-        ctx.closePath();
-
         ctx.restore();
-
-        ctx.fillStyle = "#fff";
-        ctx.font = "bold 9px sans-serif";
-        ctx.textAlign = "center";
-        ctx.fillText("かんきち", player.x + player.width / 2, player.y - 6);
-        ctx.textAlign = "left";
     }
 
     if (gameState === "PLAYING" && !player.isStunned && !player.isInvincible) {
         ctx.beginPath();
-        ctx.arc(player.x + player.width / 2, player.y + player.height / 2, player.hitRadius, 0, Math.PI * 2);
+        ctx.arc(Math.round(player.x + player.width / 2), Math.round(player.y + player.height / 2), player.hitRadius, 0, Math.PI * 2);
         ctx.fillStyle = "#ffffff";
         ctx.fill();
         ctx.closePath();
@@ -849,118 +836,63 @@ function drawPlayer() {
 
 function drawDrone() {
     const key = `drone_${drone.direction}`;
-    if (images[key] && images[key].loaded) {
-        ctx.drawImage(images[key], drone.x, drone.y, drone.width, drone.height);
-    } else {
-        // 画像未読み込み時のドット絵風ベクター（禍々しい赤色の光るドローンを描画）
-        ctx.save();
+    const rx = Math.round(drone.x);
+    const ry = Math.round(drone.y);
 
-        // メインコア
+    if (images[key] && images[key].loaded) {
+        ctx.drawImage(images[key], rx, ry, drone.width, drone.height);
+    } else {
+        ctx.save();
+        const cx = Math.round(drone.x + drone.width / 2);
+        const cy = Math.round(drone.y + drone.height / 2);
+
         ctx.beginPath();
-        ctx.arc(drone.x + drone.width/2, drone.y + drone.height/2, drone.width/3, 0, Math.PI * 2);
+        ctx.arc(cx, cy, drone.width / 3, 0, Math.PI * 2);
         ctx.fillStyle = "#aa0000";
         ctx.strokeStyle = "#ff3333";
         ctx.lineWidth = 2;
         ctx.fill();
         ctx.stroke();
         ctx.closePath();
-
-        // センサー（中心の赤く輝く目）
-        ctx.beginPath();
-        ctx.arc(drone.x + drone.width/2, drone.y + drone.height/2, drone.width/8, 0, Math.PI * 2);
-        ctx.fillStyle = "#ff0000";
-        ctx.fill();
-        ctx.closePath();
-
-        // 周囲のフレームパーツ
-        ctx.strokeStyle = "#555555";
-        ctx.lineWidth = 3;
-        ctx.beginPath();
-        ctx.moveTo(drone.x, drone.y + drone.height/2);
-        ctx.lineTo(drone.x + drone.width, drone.y + drone.height/2);
-        ctx.stroke();
-        ctx.closePath();
-
         ctx.restore();
-
-        ctx.fillStyle = "#ff3333";
-        ctx.font = "bold 9px sans-serif";
-        ctx.textAlign = "center";
-        ctx.fillText("ドローンZ", drone.x + drone.width / 2, drone.y - 6);
-        ctx.textAlign = "left";
     }
 }
 
-// 弾幕を描画するロジック（シンプルな円形ベクターに差し替え、重い影処理「shadowBlur」を完全撤廃してSafariのラグを100%解消）
 function drawBullets() {
-    bullets.forEach(b => {
-        ctx.beginPath();
-        ctx.arc(b.x, b.y, b.radius, 0, Math.PI * 2);
-        ctx.fillStyle = b.color || "#ffffff";
-        ctx.fill();
-        ctx.closePath();
-    });
+    for (let i = 0; i < MAX_BULLETS; i++) {
+        const b = bulletPool[i];
+        if (!b.active) continue;
+
+        const rx = Math.round(b.x);
+        const ry = Math.round(b.y);
+        const size = Math.round(b.radius * 3.0);
+        const halfSize = Math.round(size / 2);
+
+        if (b.img && b.img.loaded) {
+            ctx.drawImage(b.img, rx - halfSize, ry - halfSize, size, size);
+        } else {
+            // オフスクリーンに事前キャッシュされた仮想Canvasから転送 (ベクターパス生成を回避)
+            ctx.drawImage(b.fallback, rx - halfSize, ry - halfSize);
+        }
+    }
 }
 
-// 闇のオーブとお助けアイテムの描画ロジック（重い影処理「shadowBlur」を完全撤廃し、多重アルファリングによる「超軽量ネオン描画」に移行）
 function drawOrbAndItems() {
-    // 闇のオーブ (半透明の円を3層重ねて描くことで、処理負荷ゼロで幻想的なネオンの光を表現)
+    const ox = Math.round(darkOrb.x);
+    const oy = Math.round(darkOrb.y);
 
-    // 1層目: 広範囲の極薄い光
-    ctx.beginPath();
-    ctx.arc(darkOrb.x, darkOrb.y, darkOrb.radius * 1.5, 0, Math.PI * 2);
-    ctx.fillStyle = "rgba(170, 0, 255, 0.15)";
-    ctx.fill();
-    ctx.closePath();
+    // 闇のオーブ (プリレンダリングしたオフスクリーンCanvasから1発で転送)
+    ctx.drawImage(orbCanvas, ox - 20, oy - 20);
 
-    // 2層目: 中範囲の淡い光
-    ctx.beginPath();
-    ctx.arc(darkOrb.x, darkOrb.y, darkOrb.radius * 1.25, 0, Math.PI * 2);
-    ctx.fillStyle = "rgba(170, 0, 255, 0.4)";
-    ctx.fill();
-    ctx.closePath();
-
-    // 3層目: 密度の高いコア
-    ctx.beginPath();
-    ctx.arc(darkOrb.x, darkOrb.y, darkOrb.radius, 0, Math.PI * 2);
-    ctx.fillStyle = "#aa00ff";
-    ctx.fill();
-    ctx.closePath();
-
-    // お助けアイテム (多重アルファリングによる軽量ネオンバッジ)
+    // お助けアイテム
     if (activeItem) {
-        const itemX = activeItem.x + activeItem.width/2;
-        const itemY = activeItem.y + activeItem.height/2;
-        const itemRadius = activeItem.width/2;
+        const itemKey = `item_${activeItem.type}`;
+        const ix = Math.round(activeItem.x);
+        const iy = Math.round(activeItem.y);
 
-        let color = "#ffffff";
-        let glowColor = "rgba(255, 255, 255, 0.2)";
-        let text = "";
-
-        if (activeItem.type === "speed") { color = "#00ff00"; glowColor = "rgba(0, 255, 0, 0.2)"; text = "S"; }
-        else if (activeItem.type === "life") { color = "#ff00ff"; glowColor = "rgba(255, 0, 255, 0.2)"; text = "L"; }
-        else if (activeItem.type === "freeze") { color = "#00ffff"; glowColor = "rgba(0, 255, 255, 0.2)"; text = "F"; }
-
-        // 1層目: 淡いネオンオーラ
-        ctx.beginPath();
-        ctx.arc(itemX, itemY, itemRadius * 1.4, 0, Math.PI * 2);
-        ctx.fillStyle = glowColor;
-        ctx.fill();
-        ctx.closePath();
-
-        // 2層目: コアサークル
-        ctx.beginPath();
-        ctx.arc(itemX, itemY, itemRadius, 0, Math.PI * 2);
-        ctx.fillStyle = color;
-        ctx.fill();
-        ctx.closePath();
-
-        // 文字
-        ctx.fillStyle = "#000000";
-        ctx.font = "bold 12px sans-serif";
-        ctx.textAlign = "center";
-        ctx.fillText(text, itemX, itemY + 4);
-        ctx.textAlign = "left";
+        if (images[itemKey] && images[itemKey].loaded) {
+            ctx.drawImage(images[itemKey], ix, iy, activeItem.width, activeItem.height);
+        }
     }
 }
 
@@ -981,11 +913,11 @@ function drawUI() {
         ctx.fillStyle = "#ff55ff";
         ctx.font = "14px Arial";
         let patternName = "";
-        if (drone.currentPattern === "FIST") patternName = "Zパンチ（巨大拳・タメ突進/前方霧散）";
-        if (drone.currentPattern === "BEAM") patternName = "じごくのほのお（時間差・追尾炎）";
-        if (drone.currentPattern === "SPIRAL") patternName = "ウッキー・スパイラル（渦巻き）";
-        if (drone.currentPattern === "SWEEP") patternName = "ヴァイパー・スイープ（スイング）";
-        if (drone.currentPattern === "FLOWER") patternName = "ふくびきけん・キャットバースト（十方放射）";
+        if (drone.currentPattern === "FIST") patternName = "Zパンチ";
+        if (drone.currentPattern === "BEAM") patternName = "じごくのほのお";
+        if (drone.currentPattern === "SPIRAL") patternName = "ウッキー・スパイラル";
+        if (drone.currentPattern === "SWEEP") patternName = "ヴァイパー・スイープ";
+        if (drone.currentPattern === "FLOWER") patternName = "ふくびきけん・キャットバースト";
         ctx.fillText(`弾幕モード: ${patternName}`, 15, 120);
     }
 
@@ -1006,8 +938,10 @@ function drawUI() {
 
 let lastTime = performance.now();
 function loop(now) {
-    const deltaTime = (now - lastTime) / 1000;
+    let deltaTime = (now - lastTime) / 1000;
     lastTime = now;
+
+    if (deltaTime > 0.1) deltaTime = 0.1;
 
     update(deltaTime);
 

@@ -61,11 +61,69 @@ p {
     color: #ccc;
 }
 
+.main-layout {
+    display: flex;
+    flex-direction: row;
+    justify-content: space-around;
+    align-items: stretch;
+    width: 90%;
+    max-width: 740px;
+    margin-top: 10px;
+    gap: 30px;
+}
+
 .mode-buttons {
     display: flex;
     flex-direction: column;
     gap: 15px;
     width: 250px;
+}
+
+.leaderboard-container {
+    flex: 1;
+    background: rgba(255, 255, 255, 0.05);
+    border: 1px solid #444;
+    border-radius: 8px;
+    padding: 15px;
+    display: flex;
+    flex-direction: column;
+    max-height: 280px;
+    text-align: left;
+}
+
+.leaderboard-container h3 {
+    margin-top: 0;
+    margin-bottom: 12px;
+    font-size: 1.1rem;
+    color: #ffaa00;
+    border-bottom: 1px solid #333;
+    padding-bottom: 6px;
+}
+
+#leaderboard-list {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    font-size: 0.9rem;
+    overflow-y: auto;
+}
+
+.leaderboard-row {
+    display: flex;
+    justify-content: space-between;
+    background: rgba(255, 255, 255, 0.02);
+    padding: 6px 10px;
+    border-radius: 4px;
+    border: 1px solid rgba(255, 255, 255, 0.05);
+}
+
+.leaderboard-row span:first-child {
+    font-weight: bold;
+    color: #ddd;
+}
+
+.leaderboard-row span:last-child {
+    color: #00ffaa;
 }
 
 button {
@@ -90,4 +148,20 @@ button:hover {
     margin-top: 20px;
     font-size: 1rem;
     color: #aaa;
+}
+
+#ranking-input-container {
+    display: flex;
+    gap: 10px;
+    justify-content: center;
+}
+
+#player-name {
+    padding: 10px;
+    font-size: 1rem;
+    background: #222;
+    border: 1px solid #555;
+    color: #fff;
+    border-radius: 4px;
+    outline: none;
 }
