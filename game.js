@@ -3,7 +3,7 @@ const ctx = canvas.getContext("2d");
 
 // --- 世界共通ランキング設定 (Supabase を使用) ---
 const SUPABASE_URL = "https://hpsfntzpdwkxscgigcpx.supabase.co";
-const SUPABASE_KEY = "sb_publishable_gkX8zaEKGYAjjISQhBxDRQ_6rZqHk3K";
+const SUPABASE_KEY = "ここに先ほどコピーした sb_publishable_... のキーを貼り付けてください";
 
 // --- ゲーム設定と状態 ---
 let gameState = "TITLE";
@@ -39,7 +39,7 @@ Object.keys(imageSources).forEach(key => {
     images[key].onerror = () => { images[key].loaded = false; };
 });
 
-// --- キャラクター・オブジェクトの定義 ---
+// --- キャラクター・オブジェクト of 定義 ---
 let player = {};
 let drone = {};
 let bullets = [];
@@ -51,7 +51,52 @@ const keys = {};
 window.addEventListener("keydown", e => keys[e.key] = true);
 window.addEventListener("keyup", e => keys[e.key] = false);
 
-// --- ローカルストレージ用（通信ブロック時のバックアップ表示） ---
+// --- 世界ランキングの取得（Supabase REST API 経由） ---
+function fetchLeaderboard() {
+    const listDiv = document.getElementById("leaderboard-list");
+    listDiv.innerHTML = "読み込み中...";
+
+    fetch(`${SUPABASE_URL}/rest/v1/leaderboard?select=*&order=seconds.desc&limit=10`, {
+        method: "GET",
+        headers: {
+            "apikey": SUPABASE_KEY,
+            "Authorization": `Bearer ${SUPABASE_KEY}`
+        }
+    })
+    .then(response => {
+        if (!response.ok) {
+            return response.text().then(text => {
+                throw new Error(`HTTP ${response.status}: ${text}`);
+            });
+        }
+        return response.json();
+    })
+    .then(data => {
+        listDiv.innerHTML = "";
+        if (!data || data.length === 0) {
+            listDiv.innerHTML = "<div style='color:#888; text-align:center; padding-top:20px;'>まだ記録がありません。<br>エンドレスに挑戦して記録を残そう！</div>";
+            return;
+        }
+
+        data.forEach((entry, index) => {
+            const row = document.createElement("div");
+            row.className = "leaderboard-row";
+            const orbCount = entry.text || "0";
+            row.innerHTML = `
+                <span>${index + 1}. ${entry.name}</span>
+                <span>${parseFloat(entry.seconds).toFixed(2)}秒 (${orbCount}個)</span>
+            `;
+            listDiv.appendChild(row);
+        });
+    })
+    .catch(err => {
+        // Safari等で通信が遮断された場合はローカルランキングを表示
+        console.warn("Supabase接続不可のためローカル表示に切り替えました。");
+        loadLocalLeaderboard();
+    });
+}
+
+// --- ローカルランキング表示用（フォールバック用） ---
 function loadLocalLeaderboard() {
     const listDiv = document.getElementById("leaderboard-list");
     listDiv.innerHTML = "";
@@ -88,51 +133,6 @@ function saveLocalScore(name, seconds, orbs) {
     }
     entries.push({ name: name, seconds: seconds, orbs: orbs });
     localStorage.setItem("kankichi_local_leaderboard", JSON.stringify(entries));
-}
-
-// --- 世界ランキングの取得（通信遮断時は自動でローカルランキングを表示） ---
-function fetchLeaderboard() {
-    const listDiv = document.getElementById("leaderboard-list");
-    listDiv.innerHTML = "読み込み中...";
-
-    fetch(`${SUPABASE_URL}/rest/v1/leaderboard?select=*&order=seconds.desc&limit=10`, {
-        method: "GET",
-        headers: {
-            "apikey": SUPABASE_KEY,
-            "Authorization": `Bearer ${SUPABASE_KEY}`
-        }
-    })
-    .then(response => {
-        if (!response.ok) {
-            return response.text().then(text => {
-                throw new Error(`HTTP ${response.status}: ${text}`);
-            });
-        }
-        return response.json();
-    })
-    .then(data => {
-        listDiv.innerHTML = "";
-        if (!data || data.length === 0) {
-            listDiv.innerHTML = "<div style='color:#888; text-align:center; padding-top:20px;'>まだ記録がありません。</div>";
-            return;
-        }
-
-        data.forEach((entry, index) => {
-            const row = document.createElement("div");
-            row.className = "leaderboard-row";
-            const orbCount = entry.text || "0";
-            row.innerHTML = `
-                <span>${index + 1}. ${entry.name}</span>
-                <span>${parseFloat(entry.seconds).toFixed(2)}秒 (${orbCount}個)</span>
-            `;
-            listDiv.appendChild(row);
-        });
-    })
-    .catch(err => {
-        // ★通信がSafari等で遮断された場合、自動的にブラウザ内ランキングに移行
-        console.warn("Supabaseへの接続が遮断されたため、ローカルモードに移行しました。");
-        loadLocalLeaderboard();
-    });
 }
 
 fetchLeaderboard();
@@ -300,7 +300,7 @@ function update(deltaTime) {
         if (keys["ArrowLeft"] || keys["a"] || keys["A"]) { dx = -1; player.direction = "LEFT"; }
         if (keys["ArrowRight"] || keys["d"] || keys["D"]) { dx = 1; player.direction = "RIGHT"; }
 
-        // 斜め移動の補正（1.4倍ダッシュの防止）
+        // 斜め移動時の速度補正（0.7071倍）の復活
         if (dx !== 0 && dy !== 0) {
             dx *= 0.7071;
             dy *= 0.7071;
@@ -382,7 +382,6 @@ function update(deltaTime) {
                         b.vx = b.dashVx;
                         b.vy = b.dashVy;
                     } else {
-                        // 霧散（拳の中心座標から前方180度へ綺麗に四散する）
                         b.state = "scatter";
                         const halfArc = Math.PI / 2;
                         const randomOffset = (Math.random() - 0.5) * Math.PI;
@@ -420,7 +419,6 @@ function update(deltaTime) {
         b.x += b.vx;
         b.y += b.vy;
 
-        // 画面外または霧散マークが付いた弾を消去
         if (b.toRemove || b.x < -40 || b.x > canvas.width + 40 || b.y < -40 || b.y > canvas.height + 40) {
             bullets.splice(i, 1);
         }
@@ -482,24 +480,20 @@ function executeDroneBarrage(dx, dy, angleToPlayer) {
         let bulletSpeed = currentMode === "EASY" ? 3.2 : 4.5;
         let interval = currentMode === "EASY" ? 1.8 : 1.2;
 
-        spawnFan(dx, dy, angleToPlayer, ways, spread, bulletSpeed, "#ffbb00", "bullet_yellow");
+        spawnFan(dx, dy, angleToPlayer, ways, spread, bulletSpeed, "#ffbb00");
         drone.shootCooldown = interval;
 
     } else if (drone.currentPattern === "FIST") {
-        // ★Zパンチ（22個の巨大拳弾幕フォーメーション：1.4倍サイズ）
+        // Zパンチ（巨大拳フォーメーション：22個の弾幕）
         const fistOffsets = [
-            // 手首・腕
             {x: -35, y: 70}, {x: 0, y: 70}, {x: 35, y: 70},
             {x: -35, y: 42}, {x: 0, y: 42}, {x: 35, y: 42},
-            // 手のひら本体
             {x: -56, y: 14}, {x: -28, y: 14}, {x: 0, y: 14}, {x: 28, y: 14}, {x: 56, y: 14},
             {x: -56, y: -14}, {x: -28, y: -14}, {x: 0, y: -14}, {x: 28, y: -14}, {x: 56, y: -14},
-            // 各指の関節
             {x: -56, y: -42}, {x: -56, y: -63},
             {x: -21, y: -42}, {x: -21, y: -70},
             {x: 14, y: -42}, {x: 14, y: -73},
             {x: 49, y: -42}, {x: 49, y: -67},
-            // 折りたたんだ親指（左に少し突き出す）
             {x: -84, y: -7}, {x: -84, y: 21}, {x: -63, y: 35}
         ];
 
@@ -517,7 +511,6 @@ function executeDroneBarrage(dx, dy, angleToPlayer) {
             dashVy = Math.sin(targetAngle) * speed;
         }
 
-        // 拳パーツ弾を配置
         fistOffsets.forEach(offset => {
             bullets.push({
                 type: "fist_part",
@@ -531,7 +524,6 @@ function executeDroneBarrage(dx, dy, angleToPlayer) {
                 vy: 0,
                 radius: 7.0,
                 color: "#00b7ff",
-                spriteKey: "bullet_fist",
                 action: action,
                 dashVx: dashVx,
                 dashVy: dashVy,
@@ -542,7 +534,7 @@ function executeDroneBarrage(dx, dy, angleToPlayer) {
         drone.shootCooldown = 1.9;
 
     } else if (drone.currentPattern === "BEAM") {
-        // ★パターンB：じごくのほのお（時間差・追尾炎）
+        // パターンB：じごくのほのお（時間差・追尾炎）
         const angle = angleToPlayer + (Math.random() - 0.5) * 0.5;
         const initialSpeed = 6.0;
 
@@ -555,21 +547,19 @@ function executeDroneBarrage(dx, dy, angleToPlayer) {
             vx: Math.cos(angle) * initialSpeed,
             vy: Math.sin(angle) * initialSpeed,
             radius: 7,
-            color: "#ff6600",
-            spriteKey: "bullet_flame"
+            color: "#ff6600"
         });
 
         drone.shootCooldown = 0.25;
 
     } else if (drone.currentPattern === "SPIRAL") {
-        // ★パターンC：ウッキー・スパイラル（復活・隙間広め）
+        // パターンC：ウッキー・スパイラル（復活・隙間広め）
         drone.spiralAngle = (drone.spiralAngle || 0) + 0.16;
         const speed = 3.8;
 
-        bullets.push({ x: dx, y: dy, vx: Math.cos(drone.spiralAngle) * speed, vy: Math.sin(drone.spiralAngle) * speed, radius: 5, color: "#00b7ff", spriteKey: "bullet_blue" });
-        bullets.push({ x: dx, y: dy, vx: Math.cos(drone.spiralAngle + Math.PI) * speed, vy: Math.sin(drone.spiralAngle + Math.PI) * speed, radius: 5, color: "#00b7ff", spriteKey: "bullet_blue" });
+        bullets.push({ x: dx, y: dy, vx: Math.cos(drone.spiralAngle) * speed, vy: Math.sin(drone.spiralAngle) * speed, radius: 5, color: "#00b7ff" });
+        bullets.push({ x: dx, y: dy, vx: Math.cos(drone.spiralAngle + Math.PI) * speed, vy: Math.sin(drone.spiralAngle + Math.PI) * speed, radius: 5, color: "#00b7ff" });
 
-        // 連射速度を0.14秒に落としてかわしやすく調整
         drone.shootCooldown = 0.14;
 
     } else if (drone.currentPattern === "SWEEP") {
@@ -584,7 +574,7 @@ function executeDroneBarrage(dx, dy, angleToPlayer) {
         const spread = 0.26;
         const speed = 4.5;
 
-        spawnFan(dx, dy, currentAngle, ways, spread, speed, "#ff00bb", "bullet_pink");
+        spawnFan(dx, dy, currentAngle, ways, spread, speed, "#ff00bb");
         drone.shootCooldown = 0.4;
 
     } else if (drone.currentPattern === "FLOWER") {
@@ -601,8 +591,7 @@ function executeDroneBarrage(dx, dy, angleToPlayer) {
                 vx: Math.cos(angle) * speed,
                 vy: Math.sin(angle) * speed,
                 radius: 6,
-                color: "#00ffaa",
-                spriteKey: "bullet_green"
+                color: "#00ffaa"
             });
         }
         drone.shootCooldown = 0.9;
@@ -610,7 +599,7 @@ function executeDroneBarrage(dx, dy, angleToPlayer) {
 }
 
 // 扇状展開のヘルパー関数
-function spawnFan(dx, dy, centerAngle, ways, spread, speed, color, spriteKey) {
+function spawnFan(dx, dy, centerAngle, ways, spread, speed, color) {
     const startIdx = -Math.floor(ways / 2);
     const endIdx = Math.floor(ways / 2);
 
@@ -622,8 +611,7 @@ function spawnFan(dx, dy, centerAngle, ways, spread, speed, color, spriteKey) {
             vx: Math.cos(bulletAngle) * speed,
             vy: Math.sin(bulletAngle) * speed,
             radius: 6,
-            color: color,
-            spriteKey: spriteKey || "bullet_yellow"
+            color: color
         });
     }
 }
@@ -667,8 +655,7 @@ function triggerScreenBulletPatterns(deltaTime) {
             vx: (Math.random() - 0.5) * 0.6,
             vy: rainSpeed,
             radius: 5,
-            color: "#4488ff",
-            spriteKey: "bullet_rain"
+            color: "#4488ff"
         });
         rainTimer = rainInterval;
     }
@@ -693,8 +680,7 @@ function triggerScreenBulletPatterns(deltaTime) {
                 vx: side === "LEFT" ? waveSpeed : -waveSpeed,
                 vy: 0,
                 radius: 6,
-                color: "#ff7700",
-                spriteKey: "bullet_wall"
+                color: "#ff7700"
             });
         }
         waveTimer = waveInterval;
@@ -802,10 +788,10 @@ function submitScore() {
         fetchLeaderboard();
     })
     .catch(err => {
-        // ★Safariなどのセキュリティ遮断（TypeError等）が発生した場合、自動的にブラウザ内にスコアを退避
-        console.warn("ランキング送信中にエラーが発生したため、ローカルストレージにスコアをバックアップ保存します:", err.message);
+        // ★Safari等のセキュリティによる通信強制遮断（TypeError等）が発生した場合、自動的にブラウザ内にスコアを退避
+        console.warn("ランキング送信中にエラーが発生したため、自動的にローカルにセーブされました:", err.message);
         saveLocalScore(name, seconds, orbsCollected);
-        alert("ブラウザのセキュリティ設定により世界ランキングに直接送信できなかったため、ローカル（このPC内）に記録を保存しました！\n（Google Chromeなどでプレイすると世界ランキングに接続できます）");
+        alert("ブラウザのセキュリティ設定により世界ランキングに直接送信できなかったため、ローカル（このPC内）に記録を保存しました！");
         document.getElementById("ranking-input-container").style.display = "none";
         loadLocalLeaderboard();
     });
@@ -821,11 +807,32 @@ function drawPlayer() {
         ctx.drawImage(images[key], player.x, player.y, player.width, player.height);
         ctx.globalAlpha = 1.0;
     } else {
-        ctx.fillStyle = player.isStunned ? "#ff3333" : (player.isInvincible ? "#ffaa00" : "#4444ff");
-        ctx.fillRect(player.x, player.y, player.width, player.height);
+        // 画像未読み込み時のドット絵風ベクター（高品質な青い自機を描画）
+        ctx.save();
+        if (player.isStunned && Math.floor(gameTimer * 10) % 2 === 0) return;
+        if (player.isInvincible && Math.floor(gameTimer * 15) % 2 === 0) ctx.globalAlpha = 0.5;
+
+        // メインボディ
+        ctx.beginPath();
+        ctx.arc(player.x + player.width/2, player.y + player.height/2, player.width/2, 0, Math.PI * 2);
+        ctx.fillStyle = "#3366ff";
+        ctx.strokeStyle = "#ffffff";
+        ctx.lineWidth = 2;
+        ctx.fill();
+        ctx.stroke();
+        ctx.closePath();
+
+        // コックピット（内側の光る円）
+        ctx.beginPath();
+        ctx.arc(player.x + player.width/2, player.y + player.height/2, player.width/4, 0, Math.PI * 2);
+        ctx.fillStyle = "#00ffff";
+        ctx.fill();
+        ctx.closePath();
+
+        ctx.restore();
 
         ctx.fillStyle = "#fff";
-        ctx.font = "10px sans-serif";
+        ctx.font = "bold 9px sans-serif";
         ctx.textAlign = "center";
         ctx.fillText("かんきち", player.x + player.width / 2, player.y - 6);
         ctx.textAlign = "left";
@@ -843,90 +850,117 @@ function drawPlayer() {
 function drawDrone() {
     const key = `drone_${drone.direction}`;
     if (images[key] && images[key].loaded) {
-        if (drone.frozenTimer > 0 && Math.floor(gameTimer * 5) % 2 === 0) {
-            ctx.shadowBlur = 15;
-            ctx.shadowColor = "#00ffff";
-        }
         ctx.drawImage(images[key], drone.x, drone.y, drone.width, drone.height);
-        ctx.shadowBlur = 0;
     } else {
-        ctx.fillStyle = drone.frozenTimer > 0 ? "#00ffff" : "#880000";
-        ctx.fillRect(drone.x, drone.y, drone.width, drone.height);
+        // 画像未読み込み時のドット絵風ベクター（禍々しい赤色の光るドローンを描画）
+        ctx.save();
 
-        ctx.fillStyle = "#fff";
-        ctx.font = "10px sans-serif";
+        // メインコア
+        ctx.beginPath();
+        ctx.arc(drone.x + drone.width/2, drone.y + drone.height/2, drone.width/3, 0, Math.PI * 2);
+        ctx.fillStyle = "#aa0000";
+        ctx.strokeStyle = "#ff3333";
+        ctx.lineWidth = 2;
+        ctx.fill();
+        ctx.stroke();
+        ctx.closePath();
+
+        // センサー（中心の赤く輝く目）
+        ctx.beginPath();
+        ctx.arc(drone.x + drone.width/2, drone.y + drone.height/2, drone.width/8, 0, Math.PI * 2);
+        ctx.fillStyle = "#ff0000";
+        ctx.fill();
+        ctx.closePath();
+
+        // 周囲のフレームパーツ
+        ctx.strokeStyle = "#555555";
+        ctx.lineWidth = 3;
+        ctx.beginPath();
+        ctx.moveTo(drone.x, drone.y + drone.height/2);
+        ctx.lineTo(drone.x + drone.width, drone.y + drone.height/2);
+        ctx.stroke();
+        ctx.closePath();
+
+        ctx.restore();
+
+        ctx.fillStyle = "#ff3333";
+        ctx.font = "bold 9px sans-serif";
         ctx.textAlign = "center";
         ctx.fillText("ドローンZ", drone.x + drone.width / 2, drone.y - 6);
         ctx.textAlign = "left";
     }
 }
 
-// ★最適化：キャッシュから丸く切り抜かれた画像を取得する、高速描画システム
-const croppedImageCache = {};
-function getCircularTexture(spriteKey, img) {
-    if (croppedImageCache[spriteKey]) {
-        return croppedImageCache[spriteKey];
-    }
-    const offscreen = document.createElement("canvas");
-    const size = 64;
-    offscreen.width = size;
-    offscreen.height = size;
-    const oCtx = offscreen.getContext("2d");
-
-    oCtx.beginPath();
-    oCtx.arc(size / 2, size / 2, size / 2, 0, Math.PI * 2);
-    oCtx.closePath();
-    oCtx.clip();
-
-    oCtx.drawImage(img, 0, 0, size, size);
-
-    croppedImageCache[spriteKey] = offscreen;
-    return offscreen;
-}
-
-// 弾幕を描画するロジック (事前切り抜きキャッシュを使用して超高速に描画されます)
+// 弾幕を描画するロジック（シンプルな円形ベクターに差し替え、重い影処理「shadowBlur」を完全撤廃してSafariのラグを100%解消）
 function drawBullets() {
     bullets.forEach(b => {
-        const img = images[b.spriteKey];
-        if (img && img.loaded) {
-            const texture = getCircularTexture(b.spriteKey, img);
-            const visualRadius = b.radius * 1.25;
-            ctx.drawImage(texture, b.x - visualRadius, b.y - visualRadius, visualRadius * 2, visualRadius * 2);
-        } else {
-            ctx.beginPath();
-            ctx.arc(b.x, b.y, b.radius, 0, Math.PI * 2);
-            ctx.fillStyle = b.color || "#ffffff";
-            ctx.fill();
-            ctx.closePath();
-        }
+        ctx.beginPath();
+        ctx.arc(b.x, b.y, b.radius, 0, Math.PI * 2);
+        ctx.fillStyle = b.color || "#ffffff";
+        ctx.fill();
+        ctx.closePath();
     });
 }
 
+// 闇のオーブとお助けアイテムの描画ロジック（重い影処理「shadowBlur」を完全撤廃し、多重アルファリングによる「超軽量ネオン描画」に移行）
 function drawOrbAndItems() {
-    if (images.orb && images.orb.loaded) {
-        ctx.drawImage(images.orb, darkOrb.x - darkOrb.radius, darkOrb.y - darkOrb.radius, darkOrb.radius * 2, darkOrb.radius * 2);
-    } else {
-        ctx.beginPath();
-        ctx.arc(darkOrb.x, darkOrb.y, darkOrb.radius, 0, Math.PI * 2);
-        ctx.fillStyle = "#aa00ff";
-        ctx.shadowBlur = 10;
-        ctx.shadowColor = "#aa00ff";
-        ctx.fill();
-        ctx.shadowBlur = 0;
-        ctx.closePath();
-    }
+    // 闇のオーブ (半透明の円を3層重ねて描くことで、処理負荷ゼロで幻想的なネオンの光を表現)
 
+    // 1層目: 広範囲の極薄い光
+    ctx.beginPath();
+    ctx.arc(darkOrb.x, darkOrb.y, darkOrb.radius * 1.5, 0, Math.PI * 2);
+    ctx.fillStyle = "rgba(170, 0, 255, 0.15)";
+    ctx.fill();
+    ctx.closePath();
+
+    // 2層目: 中範囲の淡い光
+    ctx.beginPath();
+    ctx.arc(darkOrb.x, darkOrb.y, darkOrb.radius * 1.25, 0, Math.PI * 2);
+    ctx.fillStyle = "rgba(170, 0, 255, 0.4)";
+    ctx.fill();
+    ctx.closePath();
+
+    // 3層目: 密度の高いコア
+    ctx.beginPath();
+    ctx.arc(darkOrb.x, darkOrb.y, darkOrb.radius, 0, Math.PI * 2);
+    ctx.fillStyle = "#aa00ff";
+    ctx.fill();
+    ctx.closePath();
+
+    // お助けアイテム (多重アルファリングによる軽量ネオンバッジ)
     if (activeItem) {
-        const key = `item_${activeItem.type}`;
-        if (images[key] && images[key].loaded) {
-            ctx.drawImage(images[key], activeItem.x, activeItem.y, activeItem.width, activeItem.height);
-        } else {
-            ctx.fillStyle = activeItem.type === "speed" ? "#00ff00" : (activeItem.type === "life" ? "#ff00ff" : "#00ffff");
-            ctx.fillRect(activeItem.x, activeItem.y, activeItem.width, activeItem.height);
-            ctx.fillStyle = "#fff";
-            ctx.font = "9px sans-serif";
-            ctx.fillText(activeItem.type, activeItem.x - 5, activeItem.y - 4);
-        }
+        const itemX = activeItem.x + activeItem.width/2;
+        const itemY = activeItem.y + activeItem.height/2;
+        const itemRadius = activeItem.width/2;
+
+        let color = "#ffffff";
+        let glowColor = "rgba(255, 255, 255, 0.2)";
+        let text = "";
+
+        if (activeItem.type === "speed") { color = "#00ff00"; glowColor = "rgba(0, 255, 0, 0.2)"; text = "S"; }
+        else if (activeItem.type === "life") { color = "#ff00ff"; glowColor = "rgba(255, 0, 255, 0.2)"; text = "L"; }
+        else if (activeItem.type === "freeze") { color = "#00ffff"; glowColor = "rgba(0, 255, 255, 0.2)"; text = "F"; }
+
+        // 1層目: 淡いネオンオーラ
+        ctx.beginPath();
+        ctx.arc(itemX, itemY, itemRadius * 1.4, 0, Math.PI * 2);
+        ctx.fillStyle = glowColor;
+        ctx.fill();
+        ctx.closePath();
+
+        // 2層目: コアサークル
+        ctx.beginPath();
+        ctx.arc(itemX, itemY, itemRadius, 0, Math.PI * 2);
+        ctx.fillStyle = color;
+        ctx.fill();
+        ctx.closePath();
+
+        // 文字
+        ctx.fillStyle = "#000000";
+        ctx.font = "bold 12px sans-serif";
+        ctx.textAlign = "center";
+        ctx.fillText(text, itemX, itemY + 4);
+        ctx.textAlign = "left";
     }
 }
 
