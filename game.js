@@ -153,19 +153,24 @@ const keys = {};
 window.addEventListener("keydown", e => keys[e.key] = true);
 window.addEventListener("keyup", e => keys[e.key] = false);
 
-// --- ローカルランキング表示用 ---
+// --- ローカルランキング表示用 (シークレットモード保護対応) ---
 function loadLocalLeaderboard() {
     const listDiv = document.getElementById("leaderboard-list");
+    if (!listDiv) return;
     listDiv.innerHTML = "";
 
-    const data = localStorage.getItem("kankichi_local_leaderboard");
     let entries = [];
-    if (data) {
-        entries = JSON.parse(data);
+    try {
+        const data = localStorage.getItem("kankichi_local_leaderboard");
+        if (data) {
+            entries = JSON.parse(data);
+        }
+    } catch (e) {
+        console.warn("localStorage access denied (シークレットモード等の制限):", e);
     }
 
     if (entries.length === 0) {
-        listDiv.innerHTML = "<div style='color:#888; text-align:center; padding-top:20px;'>まだ記録がありません。<br>エンドレスに挑戦して記録を残そう！</div>";
+        listDiv.innerHTML = "<div style='color:#888; text-align:center; padding-top:10px; font-size: 0.85rem;'>まだ記録がありません。<br>エンドレスに挑戦して記録を残そう！</div>";
         return;
     }
 
@@ -183,15 +188,20 @@ function loadLocalLeaderboard() {
 }
 
 function saveLocalScore(name, seconds, orbs) {
-    const data = localStorage.getItem("kankichi_local_leaderboard");
     let entries = [];
-    if (data) {
-        entries = JSON.parse(data);
+    try {
+        const data = localStorage.getItem("kankichi_local_leaderboard");
+        if (data) {
+            entries = JSON.parse(data);
+        }
+        entries.push({ name: name, seconds: seconds, orbs: orbs });
+        localStorage.setItem("kankichi_local_leaderboard", JSON.stringify(entries));
+    } catch (e) {
+        console.warn("localStorage write denied (シークレットモード等の制限):", e);
     }
-    entries.push({ name: name, seconds: seconds, orbs: orbs });
-    localStorage.setItem("kankichi_local_leaderboard", JSON.stringify(entries));
 }
 
+// 起動時の初期呼び出し
 loadLocalLeaderboard();
 
 // --- 画面スケーリングを考慮したCanvas内ポインター座標取得関数 ---
@@ -202,10 +212,10 @@ function getCanvasPointerCoords(e) {
     return { x, y };
 }
 
-// --- iPad対応：Direct-on-Canvas Pointer Events ジョイスティック設定 ---
+// --- iPad/スマホ Pointer Events ジョイスティック設定 ---
 canvas.addEventListener("pointerdown", (e) => {
     if (gameState !== "PLAYING") return;
-    if (e.pointerType === "mouse") return; // マウスは除外
+    if (e.pointerType === "mouse") return; // マウス操作は除外
 
     if (activePointerId !== null) return;
 
@@ -215,7 +225,6 @@ canvas.addEventListener("pointerdown", (e) => {
     if (coords.x < canvas.width * 0.65) {
         activePointerId = e.pointerId;
 
-        // 指がCanvas外にはみ出しても追跡し続ける処理 (iPad/Safari対応)
         if (canvas.setPointerCapture) {
             try {
                 canvas.setPointerCapture(e.pointerId);

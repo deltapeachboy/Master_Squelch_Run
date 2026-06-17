@@ -28,6 +28,7 @@ canvas {
     touch-action: none; /* iPadOSやモバイルブラウザのジェスチャー・拡大・縮小を強制遮断 */
 }
 
+/* モバイルSafariで見切れるバグを防ぐため、上基準(flex-start)で配置し、縦スクロールを有効化 */
 .screen {
     position: absolute;
     top: 0;
@@ -36,18 +37,20 @@ canvas {
     height: 100%;
     display: flex;
     flex-direction: column;
-    justify-content: center;
+    justify-content: flex-start; /* WebKitの上部見切れ対策 */
     align-items: center;
     background-color: rgba(0, 0, 0, 0.85);
     text-align: center;
     box-sizing: border-box;
-    z-index: 2; /* UIボタンなどをCanvasより前面に配置 */
+    z-index: 2;
+    overflow-y: auto; /* コンテンツが潰れた場合にスクロール可能にする */
+    padding: 20px 10px; /* 上下の余白を確保 */
 }
 
 h1 {
-    font-size: 3rem;
+    font-size: 2.2rem;
     margin-top: 0;
-    margin-bottom: 20px;
+    margin-bottom: 10px;
     text-shadow: 0 0 10px rgba(255, 255, 255, 0.5);
 }
 
@@ -62,8 +65,8 @@ h1 {
 }
 
 p {
-    font-size: 1.2rem;
-    margin-bottom: 30px;
+    font-size: 1.1rem;
+    margin-bottom: 20px;
     color: #ccc;
 }
 
@@ -74,14 +77,14 @@ p {
     align-items: stretch;
     width: 90%;
     max-width: 740px;
-    margin-top: 10px;
+    margin-top: 5px;
     gap: 30px;
 }
 
 .mode-buttons {
     display: flex;
     flex-direction: column;
-    gap: 15px;
+    gap: 12px;
     width: 250px;
 }
 
@@ -175,36 +178,36 @@ button:hover {
     }
 
     h1 {
-        font-size: 1.8rem;
-        margin-bottom: 10px;
+        font-size: 1.4rem;
+        margin-bottom: 5px;
     }
 
     p {
-        font-size: 0.95rem;
-        margin-bottom: 15px;
+        font-size: 0.85rem;
+        margin-bottom: 10px;
     }
 
     .main-layout {
         flex-direction: column;
         align-items: center;
-        gap: 15px;
-        width: 95%;
+        gap: 10px;
+        width: 100%;
     }
 
     .mode-buttons {
         width: 100%;
-        gap: 8px;
+        gap: 6px;
     }
 
     .leaderboard-container {
         width: 100%;
         box-sizing: border-box;
-        max-height: 140px;
-        padding: 10px;
+        max-height: 120px;
+        padding: 8px;
     }
 
     button {
-        padding: 8px 15px;
-        font-size: 0.95rem;
+        padding: 6px 12px;
+        font-size: 0.85rem;
     }
 }
