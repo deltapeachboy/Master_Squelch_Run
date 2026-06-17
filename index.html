@@ -2,7 +2,7 @@
 <html lang="ja">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no, viewport-fit=cover">
     <title>ドローンZからにげろ！</title>
     <link rel="stylesheet" href="style.css">
 </head>
@@ -29,26 +29,19 @@
         <!-- ゲームプレイ画面 -->
         <canvas id="gameCanvas" width="800" height="600" style="display: none;"></canvas>
 
-        <!-- タッチ操作用バーチャルジョイスティック -->
-        <div id="joystick-container">
-            <div id="joystick-base">
-                <div id="joystick-stick"></div>
-            </div>
-        </div>
-
         <!-- ゲームオーバー画面 -->
         <div id="gameover-screen" class="screen" style="display: none;">
             <h1 class="danger">GAME OVER</h1>
             <p id="gameover-reason"></p>
             <p id="gameover-score"></p>
 
-            <!-- コンティニュー用（残機がある場合のみ） -->
+            <!-- コンティニュー用（残機がある場合のみ表示） -->
             <div id="continue-container" style="display: none; margin-bottom: 20px;">
                 <p>しゅっせいだけの力で復活できます！</p>
                 <button id="continue-button" class="accent-btn" onclick="continueGame()">コンティニューする</button>
             </div>
 
-            <!-- スコア保存フォーム（エンドレス時のみ） -->
+            <!-- スコア保存フォーム（エンドレス時のみ表示） -->
             <div id="ranking-input-container" style="display: none; margin-bottom: 20px;">
                 <input type="text" id="player-name" placeholder="名前を入力" maxlength="10">
                 <button onclick="submitLocalScore()">スコアを保存</button>

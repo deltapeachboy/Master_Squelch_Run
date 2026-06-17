@@ -25,6 +25,7 @@ canvas {
     width: 100%;
     height: 100%;
     background-color: #050505;
+    touch-action: none; /* iPadOSやモバイルブラウザのジェスチャー・拡大・縮小を強制遮断 */
 }
 
 .screen {
@@ -40,6 +41,7 @@ canvas {
     background-color: rgba(0, 0, 0, 0.85);
     text-align: center;
     box-sizing: border-box;
+    z-index: 2; /* UIボタンなどをCanvasより前面に配置 */
 }
 
 h1 {
@@ -164,43 +166,11 @@ button:hover {
     outline: none;
 }
 
-/* --- バーチャルジョイスティックUI --- */
-#joystick-container {
-    position: absolute;
-    bottom: 40px;
-    left: 40px;
-    width: 100px;
-    height: 100px;
-    z-index: 10;
-    display: none; /* JSのゲーム状態に応じて動的表示 */
-    touch-action: none; /* デフォルトのスクロール動作をブロック */
-}
-
-#joystick-base {
-    width: 100px;
-    height: 100px;
-    background: rgba(255, 255, 255, 0.1);
-    border: 2px solid rgba(255, 255, 255, 0.25);
-    border-radius: 50%;
-    position: relative;
-}
-
-#joystick-stick {
-    width: 40px;
-    height: 40px;
-    background: rgba(255, 255, 255, 0.5);
-    border-radius: 50%;
-    position: absolute;
-    top: 30px;
-    left: 30px;
-    pointer-events: none; /* 下層のベースにタッチを通過させる */
-}
-
-/* --- レスポンシブモバイル（スマホ・タブレット用）設定 --- */
+/* --- レスポンシブモバイル設定 --- */
 @media (max-width: 820px) {
     #game-container {
         width: 95vw !important;
-        height: calc(95vw * 0.75) !important; /* 4:3 比率維持 */
+        height: calc(95vw * 0.75) !important;
         border-width: 2px;
     }
 
@@ -236,24 +206,5 @@ button:hover {
     button {
         padding: 8px 15px;
         font-size: 0.95rem;
-    }
-
-    #joystick-container {
-        width: 80px;
-        height: 80px;
-        bottom: 20px;
-        left: 20px;
-    }
-
-    #joystick-base {
-        width: 80px;
-        height: 80px;
-    }
-
-    #joystick-stick {
-        width: 32px;
-        height: 32px;
-        top: 24px;
-        left: 24px;
     }
 }

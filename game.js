@@ -15,11 +15,13 @@ let rainTimer = 0;
 let waveTimer = 0;
 let patternTimer = 0;
 
-// タッチ操作用変数
+// Canvasダイナミックジョイスティック制御 (Pointer Events版)
 let touchActive = false;
+let activePointerId = null; // 追跡中のポインターID
+let joystickAnchor = null;  // タッチした基準座標
+let joystickCurrent = null; // スライドしている現在座標
 let touchInputX = 0;
 let touchInputY = 0;
-let hasTouchCapability = false; // タッチ環境フラグ
 
 // --- スプライト画像の定義 ---
 const images = {};
@@ -192,76 +194,75 @@ function saveLocalScore(name, seconds, orbs) {
 
 loadLocalLeaderboard();
 
-// --- バーチャルジョイスティックイベント初期化 ---
-const joystickContainer = document.getElementById("joystick-container");
-const joystickBase = document.getElementById("joystick-base");
-const joystickStick = document.getElementById("joystick-stick");
+// --- 画面スケーリングを考慮したCanvas内ポインター座標取得関数 ---
+function getCanvasPointerCoords(e) {
+    const rect = canvas.getBoundingClientRect();
+    const x = (e.clientX - rect.left) * (canvas.width / rect.width);
+    const y = (e.clientY - rect.top) * (canvas.height / rect.height);
+    return { x, y };
+}
 
-let joystickStartX = 0;
-let joystickStartY = 0;
-let joystickMaxDistance = 40;
+// --- iPad対応：Direct-on-Canvas Pointer Events ジョイスティック設定 ---
+canvas.addEventListener("pointerdown", (e) => {
+    if (gameState !== "PLAYING") return;
 
-function initJoystick() {
-    // 1. 標準的なタッチデバイス仕様テスト
-    if ('ontouchstart' in window || navigator.maxTouchPoints > 0) {
-        hasTouchCapability = true;
-    }
+    // PCなどの本物のマウス操作はジョイスティックトリガーから排除
+    if (e.pointerType === "mouse") return;
 
-    // 2. 二重セーフティ：Sniffingを通過しなくても、一度でも画面タッチがあればタッチ操作を有効化
-    window.addEventListener("touchstart", function enableTouchOnInteraction() {
-        hasTouchCapability = true;
-        if (gameState === "PLAYING") {
-            joystickContainer.style.display = "block";
-        }
-        window.removeEventListener("touchstart", enableTouchOnInteraction);
-    }, { passive: true });
+    if (activePointerId !== null) return; // シングル入力のみ
 
-    if (window.innerWidth <= 820) {
-        joystickMaxDistance = 30;
-    }
+    const coords = getCanvasPointerCoords(e);
 
-    joystickBase.addEventListener("touchstart", (e) => {
-        e.preventDefault();
+    // 画面左半分エリアをタッチした場合のみ有効化
+    if (coords.x < canvas.width * 0.65) {
+        activePointerId = e.pointerId;
+
+        // ★重要：指がCanvas外にはみ出しても追跡し続ける処理 (iPad仕様)
+        canvas.setPointerCapture(e.pointerId);
+
+        joystickAnchor = coords;
+        joystickCurrent = { x: coords.x, y: coords.y };
         touchActive = true;
-        const touch = e.touches[0];
-        const rect = joystickBase.getBoundingClientRect();
-        joystickStartX = rect.left + rect.width / 2;
-        joystickStartY = rect.top + rect.height / 2;
-        updateJoystickPosition(touch.clientX, touch.clientY);
-    }, { passive: false });
+    }
+});
 
-    window.addEventListener("touchmove", (e) => {
-        if (!touchActive) return;
-        const touch = e.touches[0];
-        updateJoystickPosition(touch.clientX, touch.clientY);
-    }, { passive: false });
+canvas.addEventListener("pointermove", (e) => {
+    if (gameState !== "PLAYING" || activePointerId === null) return;
+    if (e.pointerId !== activePointerId) return;
 
-    window.addEventListener("touchend", () => {
-        if (!touchActive) return;
-        touchActive = false;
-        touchInputX = 0;
-        touchInputY = 0;
-        joystickStick.style.transform = "translate(0px, 0px)";
-    });
-}
+    const coords = getCanvasPointerCoords(e);
+    joystickCurrent = coords;
 
-function updateJoystickPosition(clientX, clientY) {
-    let dx = clientX - joystickStartX;
-    let dy = clientY - joystickStartY;
-    const distance = Math.hypot(dx, dy);
+    let dx = joystickCurrent.x - joystickAnchor.x;
+    let dy = joystickCurrent.y - joystickAnchor.y;
+    const dist = Math.hypot(dx, dy);
+    const maxLimit = 55; // 半径
 
-    if (distance > joystickMaxDistance) {
-        dx = (dx / distance) * joystickMaxDistance;
-        dy = (dy / distance) * joystickMaxDistance;
+    if (dist > maxLimit) {
+        joystickCurrent.x = joystickAnchor.x + (dx / dist) * maxLimit;
+        joystickCurrent.y = joystickAnchor.y + (dy / dist) * maxLimit;
+        dx = joystickCurrent.x - joystickAnchor.x;
+        dy = joystickCurrent.y - joystickAnchor.y;
     }
 
-    joystickStick.style.transform = `translate(${dx}px, ${dy}px)`;
+    touchInputX = dx / maxLimit;
+    touchInputY = dy / maxLimit;
+});
 
-    touchInputX = dx / joystickMaxDistance;
-    touchInputY = dy / joystickMaxDistance;
-}
+const handlePointerReset = (e) => {
+    if (activePointerId === null || e.pointerId !== activePointerId) return;
 
-initJoystick();
+    canvas.releasePointerCapture(e.pointerId);
+    activePointerId = null;
+    joystickAnchor = null;
+    joystickCurrent = null;
+    touchActive = false;
+    touchInputX = 0;
+    touchInputY = 0;
+};
+
+canvas.addEventListener("pointerup", handlePointerReset);
+canvas.addEventListener("pointercancel", handlePointerReset);
 
 // --- ゲーム開始 ---
 function startGame(mode) {
@@ -282,17 +283,18 @@ function startGame(mode) {
     waveTimer = 0;
     patternTimer = 0;
 
+    // タッチ状態のクリア
+    activePointerId = null;
+    joystickAnchor = null;
+    joystickCurrent = null;
+    touchActive = false;
+    touchInputX = 0;
+    touchInputY = 0;
+
     document.getElementById("menu-screen").style.display = "none";
     document.getElementById("gameover-screen").style.display = "none";
     document.getElementById("clear-screen").style.display = "none";
     canvas.style.display = "block";
-
-    // プレイ開始時にタッチ環境であればコントローラーを出現させる
-    if (hasTouchCapability) {
-        joystickContainer.style.display = "block";
-    } else {
-        joystickContainer.style.display = "none";
-    }
 
     player = {
         x: canvas.width / 2,
@@ -343,10 +345,6 @@ function showMenu() {
     document.getElementById("gameover-screen").style.display = "none";
     document.getElementById("clear-screen").style.display = "none";
     canvas.style.display = "none";
-
-    // UIを隠す
-    joystickContainer.style.display = "none";
-
     loadLocalLeaderboard();
 }
 
@@ -392,9 +390,6 @@ function update(deltaTime) {
         canvas.style.display = "none";
         document.getElementById("clear-screen").style.display = "flex";
         document.getElementById("clear-score").innerText = `最終獲得オーブ数: ${orbsCollected} 個`;
-
-        // UIを隠す
-        joystickContainer.style.display = "none";
         return;
     }
 
@@ -844,10 +839,6 @@ function continueGame() {
 
     document.getElementById("gameover-screen").style.display = "none";
     canvas.style.display = "block";
-
-    if (hasTouchCapability) {
-        joystickContainer.style.display = "block";
-    }
 }
 
 // --- ゲーム終了 ---
@@ -855,9 +846,6 @@ function endGame(reason) {
     gameState = "GAMEOVER";
     canvas.style.display = "none";
     document.getElementById("gameover-screen").style.display = "flex";
-
-    // UIを非表示
-    joystickContainer.style.display = "none";
 
     let reasonText = "";
     if (reason === "ORB_TIMEOUT") {
@@ -996,6 +984,38 @@ function drawOrbAndItems() {
     }
 }
 
+// Canvas上に直接セミ透明なジョイスティックをレンダリングする関数
+function drawCanvasJoystick() {
+    if (!touchActive || !joystickAnchor || !joystickCurrent) return;
+
+    ctx.save();
+    ctx.globalAlpha = 0.35;
+
+    const ax = Math.round(joystickAnchor.x);
+    const ay = Math.round(joystickAnchor.y);
+    const cx = Math.round(joystickCurrent.x);
+    const cy = Math.round(joystickCurrent.y);
+
+    // ジョイスティックベース
+    ctx.beginPath();
+    ctx.arc(ax, ay, 50, 0, Math.PI * 2);
+    ctx.fillStyle = "#ffffff";
+    ctx.strokeStyle = "#ffffff";
+    ctx.lineWidth = 3;
+    ctx.fill();
+    ctx.stroke();
+    ctx.closePath();
+
+    // ジョイスティックスティック
+    ctx.beginPath();
+    ctx.arc(cx, cy, 20, 0, Math.PI * 2);
+    ctx.fillStyle = "#ffffff";
+    ctx.fill();
+    ctx.closePath();
+
+    ctx.restore();
+}
+
 function drawUI() {
     ctx.fillStyle = "#fff";
     ctx.font = "18px Arial";
@@ -1051,6 +1071,7 @@ function loop(now) {
         drawDrone();
         drawBullets();
         drawOrbAndItems();
+        drawCanvasJoystick();
         drawUI();
     }
     requestAnimationFrame(loop);
