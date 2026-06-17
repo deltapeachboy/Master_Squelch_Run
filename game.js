@@ -205,20 +205,24 @@ function getCanvasPointerCoords(e) {
 // --- iPad対応：Direct-on-Canvas Pointer Events ジョイスティック設定 ---
 canvas.addEventListener("pointerdown", (e) => {
     if (gameState !== "PLAYING") return;
+    if (e.pointerType === "mouse") return; // マウスは除外
 
-    // PCなどの本物のマウス操作はジョイスティックトリガーから排除
-    if (e.pointerType === "mouse") return;
-
-    if (activePointerId !== null) return; // シングル入力のみ
+    if (activePointerId !== null) return;
 
     const coords = getCanvasPointerCoords(e);
 
-    // 画面左半分エリアをタッチした場合のみ有効化
+    // 画面左側半分をタッチした場合にジョイスティックを有効化
     if (coords.x < canvas.width * 0.65) {
         activePointerId = e.pointerId;
 
-        // ★重要：指がCanvas外にはみ出しても追跡し続ける処理 (iPad仕様)
-        canvas.setPointerCapture(e.pointerId);
+        // 指がCanvas外にはみ出しても追跡し続ける処理 (iPad/Safari対応)
+        if (canvas.setPointerCapture) {
+            try {
+                canvas.setPointerCapture(e.pointerId);
+            } catch (err) {
+                console.warn("PointerCapture failed:", err);
+            }
+        }
 
         joystickAnchor = coords;
         joystickCurrent = { x: coords.x, y: coords.y };
@@ -236,7 +240,7 @@ canvas.addEventListener("pointermove", (e) => {
     let dx = joystickCurrent.x - joystickAnchor.x;
     let dy = joystickCurrent.y - joystickAnchor.y;
     const dist = Math.hypot(dx, dy);
-    const maxLimit = 55; // 半径
+    const maxLimit = 55;
 
     if (dist > maxLimit) {
         joystickCurrent.x = joystickAnchor.x + (dx / dist) * maxLimit;
@@ -252,7 +256,14 @@ canvas.addEventListener("pointermove", (e) => {
 const handlePointerReset = (e) => {
     if (activePointerId === null || e.pointerId !== activePointerId) return;
 
-    canvas.releasePointerCapture(e.pointerId);
+    if (canvas.releasePointerCapture) {
+        try {
+            canvas.releasePointerCapture(e.pointerId);
+        } catch (err) {
+            // セーフティ
+        }
+    }
+
     activePointerId = null;
     joystickAnchor = null;
     joystickCurrent = null;
