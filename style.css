@@ -22,6 +22,8 @@ body {
 
 canvas {
     display: block;
+    width: 100%;
+    height: 100%;
     background-color: #050505;
 }
 
@@ -37,10 +39,12 @@ canvas {
     align-items: center;
     background-color: rgba(0, 0, 0, 0.85);
     text-align: center;
+    box-sizing: border-box;
 }
 
 h1 {
     font-size: 3rem;
+    margin-top: 0;
     margin-bottom: 20px;
     text-shadow: 0 0 10px rgba(255, 255, 255, 0.5);
 }
@@ -144,12 +148,6 @@ button:hover {
     transform: scale(1.05);
 }
 
-#high-score-display {
-    margin-top: 20px;
-    font-size: 1rem;
-    color: #aaa;
-}
-
 #ranking-input-container {
     display: flex;
     gap: 10px;
@@ -164,4 +162,97 @@ button:hover {
     color: #fff;
     border-radius: 4px;
     outline: none;
+}
+
+/* --- バーチャルジョイスティックUI --- */
+#joystick-container {
+    position: absolute;
+    bottom: 40px;
+    left: 40px;
+    width: 100px;
+    height: 100px;
+    z-index: 10;
+    display: none; /* デバイス判定で表示切替 */
+    touch-action: none; /* ジェスチャの干渉を阻止 */
+}
+
+#joystick-base {
+    width: 100px;
+    height: 100px;
+    background: rgba(255, 255, 255, 0.1);
+    border: 2px solid rgba(255, 255, 255, 0.25);
+    border-radius: 50%;
+    position: relative;
+}
+
+#joystick-stick {
+    width: 40px;
+    height: 40px;
+    background: rgba(255, 255, 255, 0.5);
+    border-radius: 50%;
+    position: absolute;
+    top: 30px;
+    left: 30px;
+}
+
+/* --- レスポンシブモバイル（スマホ・タブレット用）設定 --- */
+@media (max-width: 820px) {
+    #game-container {
+        width: 95vw !important;
+        height: calc(95vw * 0.75) !important; /* 4:3 比率維持 */
+        border-width: 2px;
+    }
+
+    h1 {
+        font-size: 1.8rem;
+        margin-bottom: 10px;
+    }
+
+    p {
+        font-size: 0.95rem;
+        margin-bottom: 15px;
+    }
+
+    .main-layout {
+        flex-direction: column;
+        align-items: center;
+        gap: 15px;
+        width: 95%;
+    }
+
+    .mode-buttons {
+        width: 100%;
+        gap: 8px;
+    }
+
+    .leaderboard-container {
+        width: 100%;
+        box-sizing: border-box;
+        max-height: 140px;
+        padding: 10px;
+    }
+
+    button {
+        padding: 8px 15px;
+        font-size: 0.95rem;
+    }
+
+    #joystick-container {
+        width: 80px;
+        height: 80px;
+        bottom: 20px;
+        left: 20px;
+    }
+
+    #joystick-base {
+        width: 80px;
+        height: 80px;
+    }
+
+    #joystick-stick {
+        width: 32px;
+        height: 32px;
+        top: 24px;
+        left: 24px;
+    }
 }

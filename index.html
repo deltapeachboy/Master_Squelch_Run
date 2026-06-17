@@ -2,7 +2,7 @@
 <html lang="ja">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
     <title>ドローンZからにげろ！</title>
     <link rel="stylesheet" href="style.css">
 </head>
@@ -28,6 +28,13 @@
 
         <!-- ゲームプレイ画面 -->
         <canvas id="gameCanvas" width="800" height="600" style="display: none;"></canvas>
+
+        <!-- タッチ操作用バーチャルジョイスティック -->
+        <div id="joystick-container">
+            <div id="joystick-base">
+                <div id="joystick-stick"></div>
+            </div>
+        </div>
 
         <!-- ゲームオーバー画面 -->
         <div id="gameover-screen" class="screen" style="display: none;">

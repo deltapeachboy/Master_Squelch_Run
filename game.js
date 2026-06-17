@@ -15,6 +15,11 @@ let rainTimer = 0;
 let waveTimer = 0;
 let patternTimer = 0;
 
+// タッチ操作用変数
+let touchActive = false;
+let touchInputX = 0;
+let touchInputY = 0;
+
 // --- スプライト画像の定義 ---
 const images = {};
 const imageSources = {
@@ -46,7 +51,6 @@ Object.keys(imageSources).forEach(key => {
 // --- Safari高速化用：オフスクリーンキャッシュシステム ---
 const offscreenCache = {};
 
-// 画像が読み込めなかった場合の動的ベクターキャッシュ作成
 function getFallbackSprite(color, radius) {
     const key = `${color}_${radius}`;
     if (offscreenCache[key]) return offscreenCache[key];
@@ -67,7 +71,6 @@ function getFallbackSprite(color, radius) {
     return offCanvas;
 }
 
-// 闇のオーブのプリレンダリングキャッシュ
 let orbCanvas = null;
 function preRenderDarkOrb() {
     orbCanvas = document.createElement("canvas");
@@ -75,14 +78,12 @@ function preRenderDarkOrb() {
     orbCanvas.height = 40;
     const oCtx = orbCanvas.getContext("2d");
 
-    // 1層目
     oCtx.beginPath();
     oCtx.arc(20, 20, 12 * 1.3, 0, Math.PI * 2);
     oCtx.fillStyle = "rgba(170, 0, 255, 0.25)";
     oCtx.fill();
     oCtx.closePath();
 
-    // コア
     oCtx.beginPath();
     oCtx.arc(20, 20, 12, 0, Math.PI * 2);
     oCtx.fillStyle = "#aa00ff";
@@ -91,7 +92,7 @@ function preRenderDarkOrb() {
 }
 preRenderDarkOrb();
 
-// --- 弾丸のオブジェクトプール（GCスパイク完全防止） ---
+// --- 弾丸のオブジェクトプール ---
 const MAX_BULLETS = 600;
 const bulletPool = [];
 for (let i = 0; i < MAX_BULLETS; i++) {
@@ -112,7 +113,6 @@ for (let i = 0; i < MAX_BULLETS; i++) {
     });
 }
 
-// プールから不活性な弾を取得して有効化
 function spawnBullet(x, y, vx, vy, radius, color, imgKey, type = "", state = "") {
     for (let i = 0; i < MAX_BULLETS; i++) {
         const b = bulletPool[i];
@@ -136,7 +136,7 @@ function spawnBullet(x, y, vx, vy, radius, color, imgKey, type = "", state = "")
             return b;
         }
     }
-    return null; // プール空きなし時のセーフティ
+    return null;
 }
 
 // --- キャラクター・オブジェクトの定義 ---
@@ -191,6 +191,71 @@ function saveLocalScore(name, seconds, orbs) {
 
 loadLocalLeaderboard();
 
+// --- バーチャルジョイスティックイベント初期化 ---
+const joystickContainer = document.getElementById("joystick-container");
+const joystickBase = document.getElementById("joystick-base");
+const joystickStick = document.getElementById("joystick-stick");
+
+let joystickStartX = 0;
+let joystickStartY = 0;
+let joystickMaxDistance = 40; // 稼働限界半径
+
+function initJoystick() {
+    // タッチスクリーン可能か判定
+    const isTouchDevice = ('ontouchstart' in window || navigator.maxTouchPoints > 0);
+    if (isTouchDevice) {
+        joystickContainer.style.display = "block";
+    }
+
+    // レスポンシブに合わせて限界閾値をスケール補正
+    if (window.innerWidth <= 820) {
+        joystickMaxDistance = 30;
+    }
+
+    joystickBase.addEventListener("touchstart", (e) => {
+        e.preventDefault();
+        touchActive = true;
+        const touch = e.touches[0];
+        const rect = joystickBase.getBoundingClientRect();
+        joystickStartX = rect.left + rect.width / 2;
+        joystickStartY = rect.top + rect.height / 2;
+        updateJoystickPosition(touch.clientX, touch.clientY);
+    });
+
+    window.addEventListener("touchmove", (e) => {
+        if (!touchActive) return;
+        const touch = e.touches[0];
+        updateJoystickPosition(touch.clientX, touch.clientY);
+    }, { passive: false });
+
+    window.addEventListener("touchend", () => {
+        if (!touchActive) return;
+        touchActive = false;
+        touchInputX = 0;
+        touchInputY = 0;
+        joystickStick.style.transform = "translate(0px, 0px)";
+    });
+}
+
+function updateJoystickPosition(clientX, clientY) {
+    let dx = clientX - joystickStartX;
+    let dy = clientY - joystickStartY;
+    const distance = Math.hypot(dx, dy);
+
+    if (distance > joystickMaxDistance) {
+        dx = (dx / distance) * joystickMaxDistance;
+        dy = (dy / distance) * joystickMaxDistance;
+    }
+
+    joystickStick.style.transform = `translate(${dx}px, ${dy}px)`;
+
+    // プレイヤーの移動成分を規格化 (-1.0 ~ 1.0)
+    touchInputX = dx / joystickMaxDistance;
+    touchInputY = dy / joystickMaxDistance;
+}
+
+initJoystick();
+
 // --- ゲーム開始 ---
 function startGame(mode) {
     currentMode = mode;
@@ -202,7 +267,6 @@ function startGame(mode) {
     lastItemSpawnTime = 0;
     activeItem = null;
 
-    // すべての弾丸をリセット
     for (let i = 0; i < MAX_BULLETS; i++) {
         bulletPool[i].active = false;
     }
@@ -275,8 +339,8 @@ function spawnDarkOrb() {
         ry = Math.random() * (canvas.height - 120) + 60;
         const dx = player.x - rx;
         const dy = player.y - ry;
-        distSq = dx * dx + dy * dy; // 高速な2乗比較
-    } while (distSq < 22500); // 150の2乗
+        distSq = dx * dx + dy * dy;
+    } while (distSq < 22500);
 
     darkOrb = { x: rx, y: ry, radius: 12 };
 }
@@ -313,7 +377,6 @@ function update(deltaTime) {
         return;
     }
 
-    // アイテム出現管理
     if (currentMode !== "ENDLESS") {
         if (!itemSpawned && gameTimer >= 22.5) {
             spawnRandomItem();
@@ -355,14 +418,36 @@ function update(deltaTime) {
     if (!player.isStunned) {
         let dx = 0;
         let dy = 0;
-        if (keys["ArrowUp"] || keys["w"] || keys["W"]) { dy = -1; player.direction = "UP"; }
-        if (keys["ArrowDown"] || keys["s"] || keys["S"]) { dy = 1; player.direction = "DOWN"; }
-        if (keys["ArrowLeft"] || keys["a"] || keys["A"]) { dx = -1; player.direction = "LEFT"; }
-        if (keys["ArrowRight"] || keys["d"] || keys["D"]) { dx = 1; player.direction = "RIGHT"; }
 
-        if (dx !== 0 && dy !== 0) {
-            dx *= 0.7071;
-            dy *= 0.7071;
+        if (touchActive) {
+            // アナログ移動
+            dx = touchInputX;
+            dy = touchInputY;
+
+            // 最大速度に調整
+            const length = Math.hypot(dx, dy);
+            if (length > 1.0) {
+                dx /= length;
+                dy /= length;
+            }
+
+            // 向きの変更判定
+            if (Math.abs(dx) > Math.abs(dy)) {
+                player.direction = dx > 0 ? "RIGHT" : "LEFT";
+            } else {
+                player.direction = dy > 0 ? "DOWN" : "UP";
+            }
+        } else {
+            // キーボード移動
+            if (keys["ArrowUp"] || keys["w"] || keys["W"]) { dy = -1; player.direction = "UP"; }
+            if (keys["ArrowDown"] || keys["s"] || keys["S"]) { dy = 1; player.direction = "DOWN"; }
+            if (keys["ArrowLeft"] || keys["a"] || keys["A"]) { dx = -1; player.direction = "LEFT"; }
+            if (keys["ArrowRight"] || keys["d"] || keys["D"]) { dx = 1; player.direction = "RIGHT"; }
+
+            if (dx !== 0 && dy !== 0) {
+                dx *= 0.7071;
+                dy *= 0.7071;
+            }
         }
 
         player.x += dx * player.speed;
@@ -430,7 +515,6 @@ function update(deltaTime) {
         const b = bulletPool[i];
         if (!b.active) continue;
 
-        // Zパンチ制御
         if (b.type === "fist_part") {
             if (b.state === "charge") {
                 b.timer -= deltaTime;
@@ -450,7 +534,6 @@ function update(deltaTime) {
                 }
             }
         }
-        // じごくのほのお制御
         else if (b.type === "delayed_flame") {
             if (b.state === "slowdown") {
                 b.vx *= 0.88;
@@ -476,7 +559,6 @@ function update(deltaTime) {
         b.x += b.vx;
         b.y += b.vy;
 
-        // 画面外への離脱判定
         if (b.x < -40 || b.x > canvas.width + 40 || b.y < -40 || b.y > canvas.height + 40) {
             b.active = false;
         }
@@ -511,7 +593,7 @@ function update(deltaTime) {
         }
     }
 
-    // 3. 弾との当たり判定 (高負荷ループ内のためMath.hypotを排除し、完全2乗距離で計算)
+    // 3. 弾との当たり判定
     if (!player.isInvincible && !player.isStunned) {
         for (let i = 0; i < MAX_BULLETS; i++) {
             const b = bulletPool[i];
@@ -527,7 +609,7 @@ function update(deltaTime) {
                 player.stunTimer = 2.0;
                 player.isInvincible = true;
                 player.invincibleTimer = 4.0;
-                b.active = false; // 弾丸消滅
+                b.active = false;
                 break;
             }
         }
@@ -781,7 +863,7 @@ function endGame(reason) {
     }
 }
 
-// --- ローカルランキングへの保存処理 ---
+// --- ローカルランキング保存 ---
 function submitLocalScore() {
     const nameInput = document.getElementById("player-name");
     const name = nameInput.value.trim().replace(/[^a-zA-Z0-9あ-んア-ン一-龠]/g, "") || "名無し";
@@ -871,7 +953,6 @@ function drawBullets() {
         if (b.img && b.img.loaded) {
             ctx.drawImage(b.img, rx - halfSize, ry - halfSize, size, size);
         } else {
-            // オフスクリーンに事前キャッシュされた仮想Canvasから転送 (ベクターパス生成を回避)
             ctx.drawImage(b.fallback, rx - halfSize, ry - halfSize);
         }
     }
@@ -881,10 +962,8 @@ function drawOrbAndItems() {
     const ox = Math.round(darkOrb.x);
     const oy = Math.round(darkOrb.y);
 
-    // 闇のオーブ (プリレンダリングしたオフスクリーンCanvasから1発で転送)
     ctx.drawImage(orbCanvas, ox - 20, oy - 20);
 
-    // お助けアイテム
     if (activeItem) {
         const itemKey = `item_${activeItem.type}`;
         const ix = Math.round(activeItem.x);
@@ -928,7 +1007,7 @@ function drawUI() {
 
     if (drone.frozenTimer > 0) {
         ctx.fillStyle = "#33ffff";
-        ctx.fillText(`ドローンZ停止: ${drone.frozenTimer.toFixed(1)}s`, 15, 180);
+        ctx.fillText(`ドローン停止: ${drone.frozenTimer.toFixed(1)}s`, 15, 180);
     }
 
     ctx.fillStyle = "#888";
