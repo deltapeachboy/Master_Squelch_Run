@@ -19,6 +19,7 @@ let patternTimer = 0;
 let touchActive = false;
 let touchInputX = 0;
 let touchInputY = 0;
+let hasTouchCapability = false; // タッチ環境フラグ
 
 // --- スプライト画像の定義 ---
 const images = {};
@@ -198,16 +199,23 @@ const joystickStick = document.getElementById("joystick-stick");
 
 let joystickStartX = 0;
 let joystickStartY = 0;
-let joystickMaxDistance = 40; // 稼働限界半径
+let joystickMaxDistance = 40;
 
 function initJoystick() {
-    // タッチスクリーン可能か判定
-    const isTouchDevice = ('ontouchstart' in window || navigator.maxTouchPoints > 0);
-    if (isTouchDevice) {
-        joystickContainer.style.display = "block";
+    // 1. 標準的なタッチデバイス仕様テスト
+    if ('ontouchstart' in window || navigator.maxTouchPoints > 0) {
+        hasTouchCapability = true;
     }
 
-    // レスポンシブに合わせて限界閾値をスケール補正
+    // 2. 二重セーフティ：Sniffingを通過しなくても、一度でも画面タッチがあればタッチ操作を有効化
+    window.addEventListener("touchstart", function enableTouchOnInteraction() {
+        hasTouchCapability = true;
+        if (gameState === "PLAYING") {
+            joystickContainer.style.display = "block";
+        }
+        window.removeEventListener("touchstart", enableTouchOnInteraction);
+    }, { passive: true });
+
     if (window.innerWidth <= 820) {
         joystickMaxDistance = 30;
     }
@@ -220,7 +228,7 @@ function initJoystick() {
         joystickStartX = rect.left + rect.width / 2;
         joystickStartY = rect.top + rect.height / 2;
         updateJoystickPosition(touch.clientX, touch.clientY);
-    });
+    }, { passive: false });
 
     window.addEventListener("touchmove", (e) => {
         if (!touchActive) return;
@@ -249,7 +257,6 @@ function updateJoystickPosition(clientX, clientY) {
 
     joystickStick.style.transform = `translate(${dx}px, ${dy}px)`;
 
-    // プレイヤーの移動成分を規格化 (-1.0 ~ 1.0)
     touchInputX = dx / joystickMaxDistance;
     touchInputY = dy / joystickMaxDistance;
 }
@@ -279,6 +286,13 @@ function startGame(mode) {
     document.getElementById("gameover-screen").style.display = "none";
     document.getElementById("clear-screen").style.display = "none";
     canvas.style.display = "block";
+
+    // プレイ開始時にタッチ環境であればコントローラーを出現させる
+    if (hasTouchCapability) {
+        joystickContainer.style.display = "block";
+    } else {
+        joystickContainer.style.display = "none";
+    }
 
     player = {
         x: canvas.width / 2,
@@ -329,6 +343,10 @@ function showMenu() {
     document.getElementById("gameover-screen").style.display = "none";
     document.getElementById("clear-screen").style.display = "none";
     canvas.style.display = "none";
+
+    // UIを隠す
+    joystickContainer.style.display = "none";
+
     loadLocalLeaderboard();
 }
 
@@ -374,6 +392,9 @@ function update(deltaTime) {
         canvas.style.display = "none";
         document.getElementById("clear-screen").style.display = "flex";
         document.getElementById("clear-score").innerText = `最終獲得オーブ数: ${orbsCollected} 個`;
+
+        // UIを隠す
+        joystickContainer.style.display = "none";
         return;
     }
 
@@ -389,7 +410,6 @@ function update(deltaTime) {
         }
     }
 
-    // かんきちの状態タイマー更新
     if (player.isStunned) {
         player.stunTimer -= deltaTime;
         if (player.stunTimer <= 0) {
@@ -420,25 +440,21 @@ function update(deltaTime) {
         let dy = 0;
 
         if (touchActive) {
-            // アナログ移動
             dx = touchInputX;
             dy = touchInputY;
 
-            // 最大速度に調整
             const length = Math.hypot(dx, dy);
             if (length > 1.0) {
                 dx /= length;
                 dy /= length;
             }
 
-            // 向きの変更判定
             if (Math.abs(dx) > Math.abs(dy)) {
                 player.direction = dx > 0 ? "RIGHT" : "LEFT";
             } else {
                 player.direction = dy > 0 ? "DOWN" : "UP";
             }
         } else {
-            // キーボード移動
             if (keys["ArrowUp"] || keys["w"] || keys["W"]) { dy = -1; player.direction = "UP"; }
             if (keys["ArrowDown"] || keys["s"] || keys["S"]) { dy = 1; player.direction = "DOWN"; }
             if (keys["ArrowLeft"] || keys["a"] || keys["A"]) { dx = -1; player.direction = "LEFT"; }
@@ -505,12 +521,10 @@ function update(deltaTime) {
         }
     }
 
-    // --- 画面全体の環境弾幕 ---
     if (drone.frozenTimer <= 0) {
         triggerScreenBulletPatterns(deltaTime);
     }
 
-    // 弾の物理更新
     for (let i = 0; i < MAX_BULLETS; i++) {
         const b = bulletPool[i];
         if (!b.active) continue;
@@ -830,6 +844,10 @@ function continueGame() {
 
     document.getElementById("gameover-screen").style.display = "none";
     canvas.style.display = "block";
+
+    if (hasTouchCapability) {
+        joystickContainer.style.display = "block";
+    }
 }
 
 // --- ゲーム終了 ---
@@ -837,6 +855,9 @@ function endGame(reason) {
     gameState = "GAMEOVER";
     canvas.style.display = "none";
     document.getElementById("gameover-screen").style.display = "flex";
+
+    // UIを非表示
+    joystickContainer.style.display = "none";
 
     let reasonText = "";
     if (reason === "ORB_TIMEOUT") {

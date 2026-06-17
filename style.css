@@ -172,8 +172,8 @@ button:hover {
     width: 100px;
     height: 100px;
     z-index: 10;
-    display: none; /* デバイス判定で表示切替 */
-    touch-action: none; /* ジェスチャの干渉を阻止 */
+    display: none; /* JSのゲーム状態に応じて動的表示 */
+    touch-action: none; /* デフォルトのスクロール動作をブロック */
 }
 
 #joystick-base {
@@ -193,6 +193,7 @@ button:hover {
     position: absolute;
     top: 30px;
     left: 30px;
+    pointer-events: none; /* 下層のベースにタッチを通過させる */
 }
 
 /* --- レスポンシブモバイル（スマホ・タブレット用）設定 --- */
